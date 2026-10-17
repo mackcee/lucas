@@ -1,5 +1,5 @@
 //! Apache-2.0 MediaPipe portrait fixture, not a captured user's webcam frame.
-#![cfg(any(feature = "ort", feature = "tract"))]
+#![cfg(feature = "ort")]
 use lucas_gaze::{
     Camera, Frame, GazeSource, ImageCamera, Landmarker, MediaPipeLandmarker, WebcamGazeSource,
     features, models::VerifiedModels,
@@ -9,16 +9,8 @@ use std::{path::PathBuf, time::Duration};
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
-#[cfg(feature = "ort")]
 fn backend() -> lucas_gaze::runtime::OrtBackend {
     lucas_gaze::runtime::OrtBackend::new(
-        VerifiedModels::load(&root().join("../../models")).unwrap(),
-    )
-    .unwrap()
-}
-#[cfg(all(feature = "tract", not(feature = "ort")))]
-fn backend() -> lucas_gaze::runtime::TractBackend {
-    lucas_gaze::runtime::TractBackend::new(
         VerifiedModels::load(&root().join("../../models")).unwrap(),
     )
     .unwrap()
@@ -87,21 +79,4 @@ fn blank_image_is_unknown_and_file_source_ends() {
     let sample = source.next_sample().unwrap().unwrap();
     assert!(sample.features.is_some() && sample.quality > 0.1);
     assert!(source.next_sample().unwrap().is_none());
-}
-#[cfg(all(feature = "tract", feature = "ort"))]
-#[test]
-fn tract_matches_ort_on_real_image() {
-    use lucas_gaze::runtime::TractBackend;
-    let frame = portrait();
-    let mut ort = MediaPipeLandmarker::new(backend());
-    let mut tract = MediaPipeLandmarker::new(
-        TractBackend::new(VerifiedModels::load(&root().join("../../models")).unwrap()).unwrap(),
-    );
-    let a = ort.locate(&frame).unwrap().unwrap();
-    let b = tract.locate(&frame).unwrap().unwrap();
-    for (a, b) in a.points.iter().zip(&b.points) {
-        assert!(
-            (a.x - b.x).abs() < 0.002 && (a.y - b.y).abs() < 0.002 && (a.z - b.z).abs() < 0.002
-        );
-    }
 }

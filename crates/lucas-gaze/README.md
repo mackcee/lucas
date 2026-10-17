@@ -6,8 +6,11 @@ Offline, single-player webcam → landmarks → filtered gaze features. This cra
 - `Camera::capture` fills caller-owned RGB8 storage; `false` means end-of-source.
 - `NokhwaCamera` (Windows/default `camera` feature) uses synchronous Media
   Foundation capture, explicit 1280×720 MJPEG/30fps for the C270, pure-Rust JPEG
-  decoding, and below-normal priority on its calling thread. Unsupported modes
-  return a recoverable error rather than silently changing resolution/frame rate.
+  decoding, and below-normal priority on its calling thread. Acquisition timestamps
+  are mapped relative to a fixed epoch at stream opening, not decoding completion;
+  missing or pre-epoch timestamps fail capture rather than inventing fresh timing.
+  Unsupported modes return a recoverable error rather than silently changing
+  resolution/frame rate.
 - `ImageCamera` reads existing still-image fixtures. `TraceGazeSource` replays
   numeric samples from an iterator; it is not a recorder or file-format promise.
 - `MediaPipeLandmarker<OrtBackend>` runs a CPU-only, one-thread pipeline with
@@ -48,8 +51,7 @@ while let Some(sample) = source.next_sample()? {
 # }
 ```
 
-Use `--no-default-features --features tract` for the pure-Rust fallback, or
-`--no-default-features` for math/replay only. Default Linux builds run fixture
+Use `--no-default-features` for math/replay only. Default Linux builds run fixture
 inference but never open a live camera; the MVP capture backend is Windows only.
 
 ## Privacy boundary

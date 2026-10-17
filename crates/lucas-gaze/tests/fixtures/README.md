@@ -8,7 +8,7 @@ camera data captured or persisted by LUCAS.
 
 Tests check full-image detection, all 478 landmarks, iris-within-eye geometry,
 tracking without repeated detection, loss on black pixels, reacquisition, frame
-gap reset, end-of-file, and (with `tract`) runtime parity. Unit tests add synthetic
+gap reset, and end-of-file. Unit tests add synthetic
 anchors, padding, rotation, canonical-pose recovery, eye closure and numeric traces.
 These fixtures do **not** establish minimap classification accuracy, robustness to
 all skin tones, reflections or low light, or live Windows camera compatibility.

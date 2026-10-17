@@ -144,9 +144,17 @@ impl<I: Iterator<Item = (Duration, PathBuf)>> Camera for ImageCamera<I> {
 }
 
 #[cfg(any(test, all(windows, feature = "camera")))]
-fn decode_mjpeg(data: &[u8], frame: &mut Frame) -> Result<()> {
+fn decode_mjpeg(
+    data: &[u8],
+    capture_timestamp: Option<Duration>,
+    epoch: Duration,
+    frame: &mut Frame,
+) -> Result<()> {
     use image::ImageDecoder;
     frame.clear();
+    let timestamp = capture_timestamp
+        .and_then(|time| time.checked_sub(epoch))
+        .ok_or(Error::CaptureFailed)?;
     let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(data))
         .map_err(|_| Error::CaptureFailed)?;
     if decoder.dimensions() != (frame.width, frame.height)
@@ -163,6 +171,7 @@ fn decode_mjpeg(data: &[u8], frame: &mut Frame) -> Result<()> {
         frame.clear();
         return Err(Error::CaptureFailed);
     }
+    frame.timestamp = timestamp;
     Ok(())
 }
 
@@ -172,13 +181,13 @@ mod windows {
     use nokhwa::utils::{
         ApiBackend, CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType,
     };
-    use std::time::Instant;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// Windows Media Foundation, synchronous mode (not nokhwa's threaded callback).
     /// C270 HD default is 1280x720 MJPEG at 30fps; software decoding, no mozjpeg.
     pub struct NokhwaCamera {
         camera: nokhwa::Camera,
-        epoch: Instant,
+        epoch: Duration,
         dimensions: (u32, u32),
     }
     impl NokhwaCamera {
@@ -203,10 +212,13 @@ mod windows {
                 ApiBackend::MediaFoundation,
             )
             .map_err(|_| Error::CameraUnavailable)?;
+            let epoch = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| Error::CameraUnavailable)?;
             camera.open_stream().map_err(|_| Error::CameraUnavailable)?;
             Ok(Self {
                 camera,
-                epoch: Instant::now(),
+                epoch,
                 dimensions: (width, height),
             })
         }
@@ -220,9 +232,13 @@ mod windows {
             if (frame.width, frame.height) != self.dimensions {
                 return Err(Error::InvalidFrame);
             }
-            let compressed = self.camera.frame_raw().map_err(|_| Error::CaptureFailed)?;
-            decode_mjpeg(&compressed, frame)?;
-            frame.timestamp = self.epoch.elapsed();
+            let compressed = self.camera.frame().map_err(|_| Error::CaptureFailed)?;
+            decode_mjpeg(
+                compressed.buffer(),
+                compressed.capture_timestamp(),
+                self.epoch,
+                frame,
+            )?;
             Ok(true)
         }
     }
@@ -261,17 +277,73 @@ mod tests {
             .to_rgb8()
             .dimensions();
         let mut frame = Frame::new(w, h).unwrap();
-        decode_mjpeg(jpeg, &mut frame).unwrap();
+        decode_mjpeg(jpeg, Some(Duration::ZERO), Duration::ZERO, &mut frame).unwrap();
         assert!(frame.rgb().iter().any(|p| *p > 0));
         assert_eq!(
-            decode_mjpeg(b"invalid jpeg", &mut frame),
+            decode_mjpeg(
+                b"invalid jpeg",
+                Some(Duration::ZERO),
+                Duration::ZERO,
+                &mut frame,
+            ),
             Err(Error::CaptureFailed)
         );
         assert!(frame.rgb().iter().all(|p| *p == 0));
         assert_eq!(
-            decode_mjpeg(jpeg, &mut Frame::new(2, 2).unwrap()),
+            decode_mjpeg(
+                jpeg,
+                Some(Duration::ZERO),
+                Duration::ZERO,
+                &mut Frame::new(2, 2).unwrap(),
+            ),
             Err(Error::InvalidFrame)
         );
+    }
+    #[test]
+    fn delayed_decoding_preserves_acquisition_timing_and_gaps() {
+        let jpeg = include_bytes!("../tests/fixtures/portrait.jpg");
+        let (w, h) = image::load_from_memory(jpeg)
+            .unwrap()
+            .to_rgb8()
+            .dimensions();
+        let mut frame = Frame::new(w, h).unwrap();
+        let epoch = Duration::from_secs(1_700_000_000);
+        let acquired = epoch + Duration::from_millis(33);
+        std::thread::sleep(Duration::from_millis(300));
+        decode_mjpeg(jpeg, Some(acquired), epoch, &mut frame).unwrap();
+        assert_eq!(frame.timestamp(), Duration::from_millis(33));
+        let first = frame.timestamp();
+        decode_mjpeg(
+            jpeg,
+            Some(epoch + Duration::from_millis(66)),
+            epoch,
+            &mut frame,
+        )
+        .unwrap();
+        assert_eq!(frame.timestamp() - first, Duration::from_millis(33));
+        let second = frame.timestamp();
+        decode_mjpeg(
+            jpeg,
+            Some(epoch + Duration::from_millis(400)),
+            epoch,
+            &mut frame,
+        )
+        .unwrap();
+        assert_eq!(frame.timestamp() - second, Duration::from_millis(334));
+    }
+    #[test]
+    fn missing_or_pre_epoch_acquisition_time_fails_and_scrubs() {
+        let jpeg = include_bytes!("../tests/fixtures/portrait.jpg");
+        let epoch = Duration::from_secs(10);
+        let mut frame = Frame::new(2, 2).unwrap();
+        for timestamp in [None, Some(epoch - Duration::from_nanos(1))] {
+            frame.rgb_mut().fill(213);
+            assert_eq!(
+                decode_mjpeg(jpeg, timestamp, epoch, &mut frame),
+                Err(Error::CaptureFailed)
+            );
+            assert!(frame.rgb().iter().all(|p| *p == 0));
+        }
     }
     #[test]
     fn rejects_oversized_and_empty_frames() {

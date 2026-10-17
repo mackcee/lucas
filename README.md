@@ -77,7 +77,7 @@ access to fetch the advisory database.
 
 These are responsibility boundaries; implementation status is described
 [above](#status). The gaze library uses hash-pinned MediaPipe models through ONNX
-Runtime behind a `GazeSource` trait, with an optional tract fallback; see
+Runtime behind a `GazeSource` trait; see
 [`models/README.md`](models/README.md) for attribution and development-only
 conversion commands. Models are never downloaded at application runtime.
 

@@ -1,7 +1,7 @@
 //! CPU-only inference adapters. Verified bytes are passed directly to the runtime
 //! to avoid a verify-then-reopen race. No model-fetching runtime feature is enabled.
 use crate::Result;
-#[cfg(any(feature = "ort", feature = "tract"))]
+#[cfg(feature = "ort")]
 use crate::{Error, models::VerifiedModels};
 
 pub struct DetectionOutput {
@@ -120,72 +120,3 @@ impl InferenceBackend for OrtBackend {
         })
     }
 }
-
-#[cfg(feature = "tract")]
-mod tract_backend {
-    use super::*;
-    use tract_onnx::prelude::*;
-    type Model = std::sync::Arc<TypedRunnableModel>;
-    pub struct TractBackend {
-        detector: Model,
-        mesh: Model,
-    }
-    impl TractBackend {
-        pub fn new(models: VerifiedModels) -> Result<Self> {
-            fn load(bytes: &[u8], size: usize) -> Result<Model> {
-                let mut reader = std::io::Cursor::new(bytes);
-                tract_onnx::onnx()
-                    .model_for_read(&mut reader)
-                    .and_then(|m| m.with_input_fact(0, f32::fact([1, size, size, 3]).into()))
-                    .and_then(|m| m.into_optimized())
-                    .and_then(|m| m.into_runnable())
-                    .map_err(|_| Error::InvalidModel)
-            }
-            Ok(Self {
-                detector: load(&models.detector, 128)?,
-                mesh: load(&models.landmarker, 256)?,
-            })
-        }
-    }
-    fn run(model: &Model, input: &[f32], size: usize) -> Result<TVec<TValue>> {
-        if input.len() != size * size * 3 {
-            return Err(Error::InvalidFrame);
-        }
-        let tensor =
-            Tensor::from_shape(&[1, size, size, 3], input).map_err(|_| Error::InvalidFrame)?;
-        model
-            .run(tvec!(tensor.into()))
-            .map_err(|_| Error::InferenceFailed)
-    }
-    fn output(outputs: &[TValue], index: usize, count: usize) -> Result<Vec<f32>> {
-        let data = outputs
-            .get(index)
-            .ok_or(Error::InvalidOutput)?
-            .try_as_plain_ram()
-            .map_err(|_| Error::InvalidOutput)?
-            .as_slice::<f32>()
-            .map_err(|_| Error::InvalidOutput)?;
-        if data.len() != count {
-            return Err(Error::InvalidOutput);
-        }
-        Ok(data.to_vec())
-    }
-    impl InferenceBackend for TractBackend {
-        fn detect(&mut self, input: &[f32]) -> Result<DetectionOutput> {
-            let outputs = run(&self.detector, input, 128)?;
-            Ok(DetectionOutput {
-                boxes: output(&outputs, 0, 896 * 16)?,
-                scores: output(&outputs, 1, 896)?,
-            })
-        }
-        fn mesh(&mut self, input: &[f32]) -> Result<MeshOutput> {
-            let outputs = run(&self.mesh, input, 256)?;
-            Ok(MeshOutput {
-                coordinates: output(&outputs, 0, 1434)?,
-                presence_logit: output(&outputs, 1, 1)?[0],
-            })
-        }
-    }
-}
-#[cfg(feature = "tract")]
-pub use tract_backend::TractBackend;

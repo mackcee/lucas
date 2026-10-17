@@ -10,7 +10,7 @@ The two checked-in ONNX files are the CPU models used by `lucas-gaze`:
 **No models are fetched at application runtime.** Ship these files beside the
 application's model directory. `VerifiedModels::load` checks them against the
 SHA-256 lock compiled into `lucas-gaze`, then hands the **same verified bytes** to
-ONNX Runtime or tract. Missing or modified files fail closed with a repair hint.
+ONNX Runtime. Missing or modified files fail closed with a repair hint.
 Replacing the on-disk lock cannot bypass verification. ONNX Runtime telemetry is
 explicitly disabled, and its runtime model-fetching feature is not enabled.
 
@@ -45,7 +45,6 @@ Normal builds/tests need no Python or model download:
 ```sh
 cargo xtask models verify
 cargo test -p lucas-gaze
-cargo test -p lucas-gaze --all-features # includes ort/tract parity
 cargo test -p lucas-gaze --no-default-features # portable math/trace tests
 cargo bench -p lucas-gaze --bench pipeline
 ```
