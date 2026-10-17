@@ -12,14 +12,15 @@ Live Client Data API will gate pulses to gameplay.
 
 ## Status
 
-Early development: **M0.1 is a workspace skeleton only**. The `lucas` binary prints
-its version; gaze tracking, calibration, overlays, storage, and training are not
-implemented yet. No camera is opened and no network requests are made by these
-stubs.
+Early development: **M2.1 adds the standalone `lucas-geometry` library**; see its
+[geometry and settings reference](crates/lucas-geometry/README.md). It is not yet
+integrated into the `lucas` binary, which still only prints its version. Gaze
+tracking, calibration, overlays, storage, and training are not implemented yet.
+No camera is opened and no network requests are made by the current application.
 
 The application targets **Windows only**. League must run in **Borderless or
-Windowed mode**, not exclusive fullscreen. The dependency-free scaffold can also
-be built and checked on Linux. Builds will initially be unsigned.
+Windowed mode**, not exclusive fullscreen. The current workspace can also be
+built and checked on Linux. Builds will initially be unsigned.
 
 ## Privacy
 
@@ -68,8 +69,8 @@ access to fetch the advisory database.
 | `lucas-app` | `lucas` binary, future tray application and UI |
 | `xtask` | Development tooling scaffold |
 
-These are responsibility boundaries, not implemented features. No third-party
-Rust dependencies or model files are included yet. The gaze pipeline will use
+These are intended responsibility boundaries; implementation status is described
+[above](#status). No model files are included yet. The gaze pipeline will use
 MediaPipe models through ONNX Runtime behind a `GazeSource` trait; see
 [`models/README.md`](models/README.md).
 
