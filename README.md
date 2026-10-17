@@ -35,7 +35,8 @@ recorded and the card does not open at game end.
 **M4.2 adds a Windows gaze debug window and opt-in numeric glance-test recorder**
 to `lucas`; follow the [Windows testing guide](docs/testing-on-windows.md) to
 download a ready-to-run CI build. Camera access requires clicking Connect camera;
-recording requires a separate opt-in. Gaze diagnostics make no network requests.
+recording requires a separate opt-in. Diagnostics use `lucas-game` to locate
+minimap settings and make no network requests.
 
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
@@ -55,7 +56,8 @@ but does not capture games. Demo mode uses only unsaved synthetic data.
 The opt-in debug glance test additionally
 stores numeric eye/head features, quality, target labels and timestamps, plus a
 camera/monitor metadata header and your lighting note. **No images are stored.**
-Traces stay in `%LOCALAPPDATA%\\lucas\\traces`; sharing is an explicit user action.
+See the [recording guide](docs/testing-on-windows.md#record-the-test-about-10-minutes)
+for local trace location, deletion and explicit sharing.
 Timer mode persists alignment profiles and user-requested numeric geometry reports
 in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only
 mode disables polling (an already-running request may finish).

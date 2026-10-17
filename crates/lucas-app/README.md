@@ -78,27 +78,24 @@ Starting the camera alone writes no trace. Every new recording requires consent.
 
 A dedicated below-normal-priority thread captures and infers. The UI reads a
 single latest numeric sample, so it cannot queue camera frames. Trace writing
-happens for every acquired sample during a recording, independently of the UI
-refresh rate. CPU time is capture/inference **thread CPU time**, not blocking
+happens on the capture thread, independently of the UI refresh rate. Samples
+acquired before the first target presentation or outside the script duration
+are not written. CPU time is capture/inference **thread CPU time**, not blocking
 camera wall time. FPS is measured over the latest 60 acquisition timestamps.
 The quality value is a heuristic, never a claim about detection accuracy.
 
 ## JSON-lines schema v1
 
-One UTF-8 JSON object per line, in this order:
+One UTF-8 JSON object per line: a header, frame records, then an end record.
+The authoritative field names, types, enum spellings and validation limits are
+the serde types and validators in [`trace.rs`](src/trace.rs), with target/phase
+types in [`script.rs`](src/script.rs) and minimap metadata in
+[`settings.rs`](src/settings.rs). Use those definitions rather than a copied
+schema. `timestamp_ns` is relative to test start; `source_timestamp_ns` preserves
+the camera-open origin.
 
-- `record: "header"`: `schema_version`, `app_version`, `started_unix_ms`, `camera`
-  (`name`, negotiated `resolution: [width,height]`, requested/negotiated `fps`),
-  `monitor_resolution`, `dpi_scale`, `lighting_note`, `script_seconds`, and `minimap`
-  (`source`: `persisted_settings` or `default`, `minimap_scale`, `flipped`).
-- `record: "frame"`: `timestamp_ns` since test start, `source_timestamp_ns` since
-  camera-open, `features`, `raw_features`, `face_found`, `quality` (0..1), `cpu_ms`,
-  `phase` and `target`.
-- `record: "end"`: `frames` and `reason` (`completed`, `cancelled`, `tracking_error`).
-
-Feature arrays have exactly ten finite numbers, in `trace::FEATURE_NAMES` order:
-right eye horizontal, vertical, aperture; left eye horizontal, vertical, aperture;
-head yaw, pitch, roll (radians), relative distance (inverse fit scale, not metres).
+Feature arrays follow `trace::FEATURE_NAMES` in [`trace.rs`](src/trace.rs).
+Head angles are in radians; relative distance is inverse fit scale, not metres.
 Right/left are anatomical; eye coordinates are in the unmirrored camera image.
 `raw_features` is extraction before smoothing; `features` is the M4.1 One-Euro
 output. Both are null for unknown/closed/occluded eyes, even when a face is found.
@@ -121,27 +118,22 @@ The header wall clock identifies the session; durations use monotonic time.
 Minimizing/unfocusing is unlabelled and does not pause the script. On completion or
 cancellation, in-flight samples not delivered before finalization are not stored.
 
-The writer uses create-new filenames, checks finite values and increasing times,
-flushes every 30 records, and writes/syncs an explicit end record on orderly stop.
+The capture worker uses create-new filenames and syncs the file after the trace
+writer flushes an explicit end record on orderly stop. The writer checks finite
+values and increasing times, and periodically flushes frames.
 The reader rejects unsupported schemas, extra fields (including pixel payloads),
 nonfinite data, invalid targets, backwards/duplicate times, oversized lines,
 excessive frame counts, truncated recordings and data after the end record. It
-accepts cancelled/error traces and reports that status. Limits: 16 KiB per JSON
-line, 120,000 frames (one hour at 30 fps plus headroom), and a 2 KiB note.
+accepts cancelled/error traces and reports that status. See the constants and
+validators in [`trace.rs`](src/trace.rs) for the enforced size limits.
 
 ## Script and replay
 
-`Script::at` is pure: 2 seconds of countdown then 4 seconds of hold per trial,
-alternating elsewhere/minimap, 600 seconds by default. Elsewhere positions rotate
-through centre, corners/edges and near-map negatives, excluding positions inside
-or within 4% of screen height of the minimap. Geometry uses the main monitor's
-physical dimensions and the resolved `MinimapScale` and `FlipMiniMap` from
-`PersistedSettings.json`, without calibration. Discovery uses `lucas-game`'s
-Windows installation locator and reader; only a missing file permits
-`MinimapSettings::default()`. Read, parse and missing-field errors block recording.
-The trace header records the source and resolved values, not the local path.
-Durations are 60–600 seconds in multiples of six. Shorter tests retain alternation
-but may not visit every calibration position.
+`Script::at` is pure; [`script.rs`](src/script.rs) owns the schedule constants,
+duration validation and target construction. See the
+[recording guide](../../docs/testing-on-windows.md#record-the-test-about-10-minutes)
+for session timing, settings discovery/fallback and target geometry. Shorter tests
+retain alternation but may not visit every calibration position.
 
 ```sh
 cargo test -p lucas-app

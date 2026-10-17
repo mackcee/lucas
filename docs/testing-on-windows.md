@@ -165,4 +165,5 @@ and fitting are M5.1; this build does not claim that the criterion has passed.
   opening the camera. `--version` and `--help` do not open a window.
 - Offline, on Windows or Linux: `cargo xtask replay path/to/trace.jsonl` prints
   frames, valid-frame share, observed fps and per-target-kind feature distributions.
-  See [the trace format](../crates/lucas-app/README.md) for timestamp and label semantics.
+  See [the trace format](https://github.com/mackcee/lucas/blob/main/crates/lucas-app/README.md)
+  for timestamp and label semantics (select the tested commit when using a PR build).
