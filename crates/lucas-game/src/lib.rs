@@ -1,9 +1,9 @@
 //! Read-only League Live Client integration. No LCU, process handles, hooks or input.
 //!
-//! [`LiveClient`] performs blocking, bounded polls on a worker thread; [`GameState`]
-//! consumes timestamped snapshots without a clock or OS dependency. The app combines
-//! [`Eligibility`] with gaze and [`WindowStatus`] and owns any explicit window-only
-//! fallback. Failed polls never silently enable game eligibility.
+//! Call [`LiveClient`]'s blocking, bounded polls on an app-owned worker thread;
+//! [`GameState`] consumes timestamped snapshots without a clock or OS dependency.
+//! The app combines [`Eligibility`] with gaze and [`WindowStatus`] and owns any
+//! explicit window-only fallback. Failed polls never silently enable game eligibility.
 
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 #![deny(unsafe_code, unsafe_op_in_unsafe_fn)]

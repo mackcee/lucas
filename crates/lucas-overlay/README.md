@@ -43,7 +43,7 @@ overlay.shutdown()?;
 On Windows, replace the constructor with
 `win32::Win32Overlay::new(map, win32::TargetWindow::new(game_hwnd), win32::Options::default())`.
 Keep the target HWND valid for the overlay's lifetime. `TargetEligibility` is a
-small injectable seam for future `lucas-game` detection and synthetic tests;
+small injectable seam for an application adapter to `lucas-game` and synthetic tests;
 its `check` must reject background, minimized, missing, and exclusive targets.
 The native `TargetWindow` implementation uses public window metadata only.
 
@@ -98,9 +98,10 @@ window/monitor bounds. It is conservative, not definitive: fullscreen
 optimizations can make modes indistinguishable. Query failures return errors,
 not a false promise of support. Show requests return `TargetNotForeground` or
 `ExclusiveFullscreen` when rejected; the latter explains **Switch League to
-Borderless or Windowed** for the embedding UI to display. The helper is here
-because `lucas-game` did not yet implement it;
-future game discovery should reuse it rather than add a second detector.
+Borderless or Windowed** for the embedding UI to display. This presentation-time
+helper remains independent of `lucas-game`'s discovery probe. See the
+[game integration contract](../lucas-game/README.md#settings-and-windows) for that
+probe's classification and failure handling.
 
 `Options { exclude_from_capture: true }` opts into
 `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`. Default is **false**.

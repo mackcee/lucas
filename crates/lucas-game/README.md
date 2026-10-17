@@ -48,11 +48,11 @@ root, the Riot install manifest, and standard Windows paths. Manifest
 `LeagueClient.exe` are added. `candidates()` yields PersistedSettings.json before
 game.cfg for each root. Pass `SettingsFile::read()` text to lucas-geometry's existing
 `parse_persisted_settings` or `parse_game_cfg` API according to `SettingsFormat`.
-Both return a `SettingsPatch`; use `persisted.with_fallback(game_cfg)` to fill
-missing fields from game.cfg while preferring persisted values. Only the
-application adapter connecting discovery to parsing remains unimplemented. It
-should fall through on read or parse errors; this crate only discovers and reads
-files, not HUD values.
+See the [settings parsing contract](../lucas-geometry/README.md#reading-settings)
+for `SettingsPatch`, per-field fallback, defaults, and parse-error handling. Only
+the application adapter connecting discovery to parsing remains unimplemented.
+It should fall through on read or parse errors; this crate only discovers and
+reads files, not HUD values.
 
 The Win32 probe uses only window/monitor metadata and shell notification state:
 `FindWindowW(RiotWindowClass)`, foreground and geometry checks, and
