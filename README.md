@@ -27,9 +27,10 @@ alive/game gating (with explicit window-only fallback), minimap alignment and
 numeric geometry reports. See the [G1 Windows checklist](docs/testing-on-windows.md#g1--timer-mode-and-minimap-alignment-about-15-minutes).
 **M6.1 adds local persistence in [`lucas-store`](crates/lucas-store/README.md) and a
 standalone [post-game summary card](crates/lucas-app/README.md)**. Without arguments,
-`lucas` now starts **gaze coaching on Windows (M5.2)**. Complete calibration and
-the tray's four-second quick check at each game start; unknown/off-screen gaze
-pauses coaching. Summaries are stored locally and the card opens at game end.
+`lucas` starts **gaze coaching on Windows (M5.2)**, with **M6.2 first-run setup,
+manual controls and solo games** described in [Getting started](#getting-started).
+Unknown/off-screen gaze pauses coaching. Summaries are stored locally and the card
+opens at game end.
 See the [runtime guide](crates/lucas-app/src/runtime/README.md) for eligibility,
 camera lifetime and clock mapping. `--timer` remains an explicit no-camera option;
 the viewer below opens synthetic or saved summaries.
@@ -47,6 +48,32 @@ For offline recording evaluation, see the [G2 evaluator](xtask/README.md#g2-cali
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
 can also be built and checked on Linux. Builds will initially be unsigned.
+
+## Getting started
+
+1. **Download** the Windows build from [GitHub Actions](https://github.com/mackcee/lucas/actions)
+   (see the [download steps](docs/testing-on-windows.md)). Extract the whole archive,
+   keeping `models/` and the runtime DLLs beside `lucas.exe`. Builds are unsigned.
+2. **Run `lucas.exe`.** First-run setup walks through camera choice and live tracking
+   quality, a skippable Borderless check, calibration, next-game minimap alignment
+   and a starting level. Frames are never stored; nothing leaves your PC. Closing
+   before Finish discards the draft; reopen **First-run setup…** from the
+   notification-area icon to start again. Finish returns to the tray. If Finish
+   fails, retry while the window is open (see [save behavior](crates/lucas-app/src/runtime/README.md#before-play)).
+   In your next game, choose **Align minimap…**,
+   then complete the tray's quick gaze check before play. Changed geometry may need
+   explicit recalibration.
+3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
+   move through 8 → 6 → 5 s. Fade levels keep the 5 s goal but delay and soften the
+   help, make it intermittent, then turn it off. A saved level applies **next game**,
+   never mid-game. Settings also offers pulse style, colour and sound (off by default),
+   **Open data folder** and confirmed **Delete all data**.
+4. **Try a solo game.** Arm **Next game solo (no pulses)** before starting. The tray
+   tooltip announces it when armed and when play starts. That game has no visual or
+   sound pulses, but still measures your checks; its post-game card says **Solo probe**.
+   The choice is one-shot, not an automatic schedule, and is cleared on app exit.
+
+For the three-game MVP check, follow [G3](docs/testing-on-windows.md#g3--three-game-mvp-check).
 
 ## Privacy
 

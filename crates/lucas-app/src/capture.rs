@@ -190,7 +190,7 @@ impl Shared {
 pub struct Worker {
     pub shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
-    handle: JoinHandle<()>,
+    handle: Option<JoinHandle<()>>,
 }
 impl Worker {
     pub fn start(index: u32, model_dir: PathBuf, context: eframe::egui::Context) -> Self {
@@ -211,19 +211,23 @@ impl Worker {
         Self {
             shared,
             stop,
-            handle,
+            handle: Some(handle),
         }
     }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
     }
     pub fn finished(&self) -> bool {
-        self.handle.is_finished()
+        self.handle.as_ref().is_none_or(JoinHandle::is_finished)
     }
 }
 impl Drop for Worker {
     fn drop(&mut self) {
         self.stop();
+        // Release the device before setup hands ownership to calibration/runtime.
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 

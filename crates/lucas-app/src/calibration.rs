@@ -288,6 +288,16 @@ pub fn save(
     screen: ScreenGeometry,
     created_at_unix_ms: u64,
 ) -> crate::trace::Result<()> {
+    store.save_calibration(&profile(model, screen, created_at_unix_ms)?)?;
+    Ok(())
+}
+
+/// Construct a validated profile without committing it (first-run draft).
+pub fn profile(
+    model: &CalibrationModel,
+    screen: ScreenGeometry,
+    created_at_unix_ms: u64,
+) -> crate::trace::Result<Calibration> {
     if [screen.width, screen.height] != model.screen().resolution {
         return Err("calibration monitor changed".into());
     }
@@ -297,14 +307,13 @@ pub fn save(
     {
         return Err("calibration did not pass; previous weights retained".into());
     }
-    store.save_calibration(&Calibration {
+    Ok(Calibration {
         schema_version: 1,
         model: model.to_bytes(),
         screen,
         created_at_unix_ms,
         validation_error_degrees: Some(model.validation().mean_error_degrees),
-    })?;
-    Ok(())
+    })
 }
 /// Reject changed resolution/DPI/origin/minimap rather than reuse stale geometry.
 pub fn load(
