@@ -10,6 +10,25 @@ fn stored_card(directory: &Path) -> PostGameCard {
 }
 
 #[test]
+fn runtime_deletion_is_deferred_until_the_parent_releases_its_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut card = stored_card(directory.path());
+    let request = Arc::new(AtomicBool::new(false));
+    card.delete_request = Some(Arc::clone(&request));
+
+    card.delete_data();
+
+    assert!(request.load(Ordering::Acquire));
+    assert!(card.store.is_none());
+    let store = Store::open_in(directory.path()).unwrap();
+    assert!(store.latest_summary().unwrap().is_some());
+    assert!(directory.path().join("settings.toml").exists());
+    drop(card);
+    store.delete_all_data().unwrap();
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn deletion_retries_without_a_handle_database_or_summary() {
     let directory = tempfile::tempdir().unwrap();
     let mut card = stored_card(directory.path());

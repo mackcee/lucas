@@ -4,11 +4,11 @@
 League of Legends. It aims to help you build the habit of checking the minimap,
 then get out of the way as that habit becomes natural.
 
-The planned flow is simple: webcam gaze tracking estimates whether you glanced at
-the minimap. After a gap without a glance, an amber ripple pulses around the map;
-sound will be optional. The standard training progression shortens the gap from
-10 to 8 to 6 to 5 seconds, then fades the help as you improve. The game's local
-Live Client Data API will gate pulses to gameplay.
+Webcam gaze tracking estimates whether you glanced at the minimap. After a gap
+without a glance, an amber ripple pulses around the map; sound is optional and
+off by default. Training levels shorten the gap, then fade the help; level changes
+are currently manual. The game's local Live Client Data API gates pulses to
+gameplay.
 
 ## Status
 
@@ -27,14 +27,16 @@ alive/game gating (with explicit window-only fallback), minimap alignment and
 numeric geometry reports. See the [G1 Windows checklist](docs/testing-on-windows.md#g1--timer-mode-and-minimap-alignment-about-15-minutes).
 **M6.1 adds local persistence in [`lucas-store`](crates/lucas-store/README.md) and a
 standalone [post-game summary card](crates/lucas-app/README.md)**. Without arguments,
-`lucas` starts timer mode on Windows; the viewer below opens synthetic or saved
-summaries. Timer mode does not open a camera. Gaze-driven coaching, calibration
-and per-game storage are not wired into it yet, so games are not automatically
-recorded and the card does not open at game end.
+`lucas` now starts **gaze coaching on Windows (M5.2)**. Complete calibration and
+the tray's four-second quick check at each game start; unknown/off-screen gaze
+pauses coaching. Summaries are stored locally and the card opens at game end.
+See the [runtime guide](crates/lucas-app/src/runtime/README.md) for eligibility,
+camera lifetime and clock mapping. `--timer` remains an explicit no-camera option;
+the viewer below opens synthetic or saved summaries.
 
 **M4.2 adds a Windows gaze debug window and opt-in numeric glance-test recorder**
 to `lucas`; follow the [Windows testing guide](docs/testing-on-windows.md) to
-download a ready-to-run CI build. Camera access requires clicking Connect camera;
+download a ready-to-run CI build. Diagnostic camera access requires clicking Connect camera;
 recording requires a separate opt-in. Diagnostics use `lucas-game` to locate
 minimap settings and make no network requests.
 
@@ -48,21 +50,23 @@ can also be built and checked on Linux. Builds will initially be unsigned.
 
 ## Privacy
 
-The planned application has a local-only privacy contract: webcam frames never
-leave RAM and are never written to disk. Nothing is sent off the machine. The only
+LUCAS has a local-only privacy contract: webcam frames never leave RAM and are
+never written to disk. Nothing is sent off the machine. The only
 network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
 Normal-use local persistence is limited to settings, calibration, and per-game summaries
 (including event timestamps); see the [storage reference](crates/lucas-store/README.md)
-for files and deletion scope. The current viewer can open and delete saved data,
-but does not capture games. Demo mode uses only unsaved synthetic data.
+for files and deletion scope. The tray records games; the standalone viewer only
+opens saved summaries.
+Demo mode uses only unsaved synthetic data. Before deleting saved data from the
+viewer, follow the [deletion prerequisites](crates/lucas-store/README.md#privacy-controls).
 The opt-in debug glance test additionally
 stores numeric eye/head features, quality, target labels and timestamps, plus a
 camera/monitor metadata header and your lighting note. **No images are stored.**
 See the [recording guide](docs/testing-on-windows.md#record-the-test-about-10-minutes)
 for local trace location, deletion and explicit sharing.
-Timer mode persists alignment profiles and user-requested numeric geometry reports
+The tray persists alignment profiles and user-requested numeric geometry reports
 in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only
 mode disables polling (an already-running request may finish).
 Developer build and dependency-check tools may access package registries and
@@ -77,7 +81,9 @@ The toolchain and required components are pinned in
 ```sh
 cargo build --workspace
 cargo run --bin lucas -- --version
-# Windows: start timer mode in the notification area
+# Windows: start gaze coaching (requires models/ beside the built executable)
+cargo run --bin lucas
+# Explicit no-camera timer fallback:
 cargo run --bin lucas -- --timer
 # Windows diagnostics and calibration (models from this checkout):
 cargo run --bin lucas -- --calibrate --models models
@@ -122,7 +128,7 @@ metric interpretation and integration.
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
-| `lucas-app` | Windows timer tray, alignment, numeric reports, post-game card, calibration, gaze debug UI and opt-in traces |
+| `lucas-app` | Windows gaze-coaching tray, explicit timer fallback, alignment, per-game storage/card, calibration, gaze debug UI and opt-in traces |
 | `xtask` | Synthetic-player simulator, trace replay and G2 evaluation, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described

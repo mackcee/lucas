@@ -1,7 +1,8 @@
 # Post-game summary window
 
-This chunk adds `lucas_app::postgame`, independent of the tray, camera debug
-window, and future game loop. It never opens automatically during play.
+`lucas_app::postgame` remains usable independently of the tray and gaze debug
+window. The [gaze runtime](src/runtime/README.md) now opens it after game end,
+never as an in-game score.
 
 See the root README's [viewer commands](../../README.md#preview-the-post-game-card)
 for synthetic and saved-game previews.
@@ -21,15 +22,21 @@ lucas_app::postgame::show_postgame(card)?;
 ```
 
 `show_postgame` starts an eframe event loop and belongs on the main/UI thread.
-An already-running UI should embed `PostGameCard::show(ui)` instead. Game-end
-routing, suppressing the card during play, and pause-aware event clock mapping
-remain the later loop's responsibility. Follow the storage reference's
+An already-running UI should embed `PostGameCard::show(ui)` instead. The tray
+runtime hosts the card in a subprocess and owns game-end routing, in-game
+suppression and pause-aware event clock mapping. Follow the storage reference's
 [deletion prerequisites](../lucas-store/README.md#privacy-controls) first:
 ownership transfers into the card so **Delete all data** can close SQLite before
-deleting files. Deletion requires a second,
-explicit confirmation and clears the in-memory card on success. If deleting
-fails, keep the card open, close other LUCAS windows, and choose **Delete all data**
-again. The card can retry even if the database or summary has already been removed.
+deleting files. Deletion requires a second, explicit confirmation.
+
+- In the standalone viewer or an embedded card, success clears the in-memory card.
+  If deleting fails, keep the card open, close other LUCAS windows, and choose
+  **Delete all data** again. The card can retry even if the database or summary
+  has already been removed.
+- In the tray-opened card, confirmation closes the card and requests tray shutdown.
+  The tray releases its workers, children and cached state before deleting files.
+  Close independently launched diagnostics/viewers first as required by the
+  storage contract above. Restart LUCAS to begin with fresh settings and calibration.
 
 ## Reading the card
 
@@ -66,10 +73,9 @@ M4.2 provides the Windows `lucas` debug window and an opt-in fullscreen glance
 recorder. The library contains portable script, trace-format and replay-summary
 logic; it does not start a camera or touch disk merely by being linked. See
 [Windows testing](../../docs/testing-on-windows.md) for the tester checklist.
-M5.1 adds calibration/classification, described below. The separate timer
-tray starts with no arguments or `--timer`; use `lucas --calibrate` or
-`lucas --seconds 600` for the shared gaze window. Timer pulses are not driven by
-gaze; live-loop integration remains separate.
+Calibration/classification is described below. The tray starts gaze coaching
+with no arguments; `--timer` is the explicit no-gaze option. Use `lucas --calibrate`
+or `lucas --seconds 600` for the standalone shared gaze window.
 
 ## Data boundary
 
@@ -181,12 +187,14 @@ calibration. Escape cancels without replacing previous weights.
 Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
 **in front** of the player. Luma is computed in RAM; no image is stored. A result
 shows mean angular error, sensitivity/FPR and pass/fail. Only passing fits save
-weights/geometry/validation aggregates through `lucas-store`; failures retain the
-previous model. Full calibration samples never create a numeric trace file.
+weights/geometry/validation aggregates through `lucas-store` and update the saved
+camera selection; failures retain the previous model. Full calibration samples
+never create a numeric trace file.
 The separate glance recorder still requires explicit opt-in for each recording.
 
 **Quick check** uses one minimap and one centre target in four seconds. It neither
-refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
+refits nor saves and must use the saved calibrated camera. Repeat full calibration
+after a failed quick check. For integrations:
 
 1. Construct `CalibrationScript::new` with the current settings and loaded
    `AlignmentStore` as above. Pass its `screen().minimap` to
@@ -198,8 +206,8 @@ refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
    `validation.passes(model.target_false_positive_rate())` before enabling gaze.
 4. Feed the camera stream to `lucas_gaze::decision::CalibratedDetector`.
 
-The caller owns game-start routing, unknown handling in play, and disabling gaze
-when revalidation fails. Those are not connected to the pulse loop in this chunk.
+The [runtime guide](src/runtime/README.md#before-play) owns game-start routing,
+calibration snapshot matching and failure handling for the tray integration.
 
 ## Windows bundle
 

@@ -46,6 +46,57 @@ fn fitted() -> lucas_gaze::calibration::CalibrationModel {
     fit_session(&script, &observations).unwrap()
 }
 #[test]
+fn quick_check_snapshot_rejects_replaced_weights_and_changed_cameras() {
+    let model_a = fitted();
+    let expected_a = quick_snapshot_id(&model_a, 0);
+    let script = CalibrationScript::new(
+        [1920, 1080],
+        MinimapSettings::default(),
+        &AlignmentStore::default(),
+        [531.0, 299.0],
+        650.0,
+    )
+    .unwrap();
+    let observations: Vec<_> = script
+        .targets()
+        .iter()
+        .flat_map(|t| {
+            (0..30).map(move |i| {
+                let p = [t.target.position[0] + 0.02, t.target.position[1]];
+                observation(t.target, sample(p, i))
+            })
+        })
+        .collect();
+    let model_b = fit_session(&script, &observations).unwrap();
+    assert_ne!(model_a, model_b);
+    let dir = tempfile::tempdir().unwrap();
+    let store = lucas_store::Store::open_in(dir.path()).unwrap();
+    let screen = lucas_store::ScreenGeometry {
+        left: 0,
+        top: 0,
+        width: 1920,
+        height: 1080,
+        scale_factor: 1.0,
+    };
+    save(&store, &model_a, screen.clone(), 1).unwrap();
+    let loaded_a = load(&store, &screen, model_a.screen().minimap)
+        .unwrap()
+        .unwrap();
+    verify_quick_snapshot(&loaded_a, 0, &expected_a).unwrap();
+    assert!(verify_quick_snapshot(&loaded_a, 1, &expected_a).is_err());
+
+    save(&store, &model_b, screen.clone(), 2).unwrap();
+    let loaded_b = load(&store, &screen, model_b.screen().minimap)
+        .unwrap()
+        .unwrap();
+    assert!(verify_quick_snapshot(&loaded_b, 0, &expected_a).is_err());
+    let expected_b = quick_snapshot_id(&model_b, 1);
+    verify_quick_snapshot(&loaded_b, 1, &expected_b).unwrap();
+    assert!(verify_quick_snapshot(&loaded_b, 0, &expected_b).is_err());
+    assert!(verify_quick_snapshot(&loaded_a, 1, &expected_b).is_err());
+}
+
+#[test]
 fn session_fits_persists_and_revalidates_without_samples_on_disk() {
     let model = fitted();
     assert!(

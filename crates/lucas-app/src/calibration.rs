@@ -10,6 +10,7 @@ use lucas_gaze::{
 };
 use lucas_geometry::{MinimapSettings, Rect, minimap_rect};
 use lucas_store::{Calibration, ScreenGeometry, Store};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 pub const SETTLE: Duration = Duration::from_millis(500);
@@ -261,6 +262,26 @@ pub fn quick_revalidate(
     }
     model.validate_samples(&observations.iter().map(|o| o.labelled).collect::<Vec<_>>())
 }
+pub fn quick_snapshot_id(model: &CalibrationModel, camera_index: u32) -> String {
+    let mut hash = Sha256::new();
+    hash.update(camera_index.to_le_bytes());
+    hash.update(model.to_bytes());
+    format!("{:x}", hash.finalize())
+}
+
+pub fn verify_quick_snapshot(
+    model: &CalibrationModel,
+    camera_index: u32,
+    expected: &str,
+) -> calibration::Result<()> {
+    if quick_snapshot_id(model, camera_index) != expected {
+        return Err(calibration::CalibrationError(
+            "Calibration or camera changed; close this check and restart it from the tray",
+        ));
+    }
+    Ok(())
+}
+
 pub fn save(
     store: &Store,
     model: &CalibrationModel,

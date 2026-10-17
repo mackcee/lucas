@@ -9,8 +9,8 @@ arrow, Shift+arrow, Enter and Esc keys. It does not send input to League.
 
 ### Start and gate checks
 
-1. Launch `lucas.exe` (or `lucas.exe --timer`). It starts in the notification area
-   with an amber square-ring icon and no application window. Check the hidden
+1. Launch `lucas.exe --timer` for this no-camera test. It starts in the notification
+   area with an amber square-ring icon and no application window. Check the hidden
    tray icons if needed. Starting it again should not create a second icon.
 2. Right-click the icon. **Use Live Client gate (recommended)** is checked by
    default. The status/tooltip should say waiting until League is foreground,
@@ -97,7 +97,8 @@ No Rust, Python, model downloads or developer tools are needed on the test PC.
    Keep `lucas.exe`, **all DLLs**, `models/` and `licenses/` together. Do not run
    the executable from inside a ZIP.
 3. From a terminal in the extracted folder, run `.\lucas.exe --seconds 600` to
-   open gaze diagnostics (double-clicking starts timer mode). Builds are unsigned:
+   open gaze diagnostics rather than the default [coaching mode](../README.md#status).
+   Builds are unsigned:
    after confirming you downloaded the intended repository/commit, SmartScreen
    may require **More info → Run anyway**.
 4. Select your Logitech C270 and click **Connect camera**. Close Discord/OBS or
