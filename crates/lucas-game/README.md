@@ -54,7 +54,10 @@ for `SettingsPatch`, per-field fallback, defaults, and parse-error handling.
 This crate only discovers and reads files, not HUD values. The timer app connects
 discovery to parsing in [`read_hud`](../lucas-app/src/timer/settings.rs); see the
 [Windows checklist](../../docs/testing-on-windows.md#start-and-gate-checks) for
-runtime settings discovery and troubleshooting.
+runtime settings discovery and troubleshooting. Diagnostics also connect discovery
+to parsing; their stricter recording policy is documented in the
+[Windows recording guide](../../docs/testing-on-windows.md#record-the-test-about-10-minutes).
+Do not assume that every caller permits fallback after read or parse errors.
 
 The Win32 probe uses only window/monitor metadata and shell notification state:
 `FindWindowW(RiotWindowClass)`, foreground and geometry checks, and

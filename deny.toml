@@ -1,3 +1,8 @@
+[graph]
+# Windows is the only shipped app target. Do not audit unused native desktop
+# backends pulled into Cargo.lock by egui's cross-platform dependency manifests.
+targets = ["x86_64-pc-windows-msvc"]
+
 [advisories]
 # Consult the RustSec advisory database with explicitly approved exceptions.
 version = 2

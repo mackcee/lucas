@@ -49,8 +49,9 @@ to [`lucas-game`](../lucas-game/README.md#settings-and-windows); the application
 owns refresh scheduling.
 
 Both return a `SettingsPatch` with optional values: missing is different from
-zero or false. Prefer the persisted patch and fill missing fields from game.cfg
-with `persisted.with_fallback(cfg).resolve(explicit_defaults)`. The provided
+zero or false. Callers that permit per-field fallback can prefer the persisted
+patch and fill missing fields from game.cfg with
+`persisted.with_fallback(cfg).resolve(explicit_defaults)`. The provided
 `MinimapSettings::default()` uses scale 1 and unflipped as an application fallback,
 not an asserted League default. No fallback is silently applied on parse errors;
 the caller can report the error and choose the other file or explicit defaults.

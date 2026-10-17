@@ -19,12 +19,18 @@ lucas-core = { path = "../lucas-core" }
 lucas-store = { path = "../lucas-store" }
 lucas-overlay = { path = "../lucas-overlay" }
 lucas-game = { path = "../lucas-game" }
+lucas-gaze = { path = "../lucas-gaze", default-features = false }
 lucas-geometry = { path = "../lucas-geometry" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "0.9"
 
 [target.'cfg(windows)'.dependencies]
+lucas-gaze = { path = "../lucas-gaze", features = ["camera", "ort"] }
+eframe = { version = "0.36.0", default-features = false, features = ["accesskit"] }
+nokhwa = { version = "0.10.11", default-features = false, features = ["input-msmf"] }
+cpu-time = "1.0"
+winit = { version = "0.30.13", default-features = false }
 tray-icon = { version = "0.26", default-features = false }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security",

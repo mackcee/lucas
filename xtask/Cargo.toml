@@ -9,5 +9,6 @@ description = "LUCAS development tools, synthetic-player simulator, and offline 
 publish = false
 
 [dependencies]
+lucas-app = { path = "../crates/lucas-app" }
 lucas-core = { path = "../crates/lucas-core" }
 lucas-gaze = { version = "0.1.0", path = "../crates/lucas-gaze", default-features = false }

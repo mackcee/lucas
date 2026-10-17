@@ -1,15 +1,22 @@
-//! Thin dispatcher; timer and gaze diagnostics belong in separate modules.
+//! Thin dispatcher; camera and recording both require a UI action.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
+mod capture;
+#[cfg(windows)]
 mod console;
+#[cfg(windows)]
+mod debug_ui;
 
-fn main() {
+use std::{path::PathBuf, process::ExitCode};
+
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+
+fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    match args.as_slice() {
-        [] => return start_timer(),
-        [flag] if flag == "--timer" => return start_timer(),
-        _ => {}
+    if args.is_empty() || matches!(args.as_slice(), [flag] if flag == "--timer") {
+        start_timer();
+        return ExitCode::SUCCESS;
     }
     #[cfg(windows)]
     console::attach_parent();
@@ -23,25 +30,68 @@ fn main() {
             eprintln!("Cannot show post-game summary: {error}");
             std::process::exit(1);
         }
-        return;
+        return ExitCode::SUCCESS;
     }
 
-    match args.as_slice() {
-        [flag] if flag == "--version" || flag == "-V" => version(),
-        [flag] if flag == "--help" || flag == "-h" => {
-            println!(
-                "LUCAS\n\nUsage: lucas [--timer | --show-postgame <demo|games.sqlite3|data-directory> | --version | --help]\n\nOn Windows, no arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder."
-            );
-        }
-        _ => {
-            eprintln!("Unknown arguments. Use --help.");
-            std::process::exit(2);
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("LUCAS: {error}");
+            ExitCode::FAILURE
         }
     }
 }
-
-fn version() {
-    println!("LUCAS {}", env!("CARGO_PKG_VERSION"));
+fn run() -> Result<(), String> {
+    let mut seconds = lucas_app::script::DEFAULT_SECONDS;
+    let mut models = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("cannot locate executable directory")?
+        .join("models");
+    let mut check_runtime = false;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--version" | "-V" => {
+                println!("LUCAS {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "--help" | "-h" => {
+                println!("{HELP}");
+                return Ok(());
+            }
+            "--seconds" => {
+                seconds = args
+                    .next()
+                    .ok_or("--seconds needs a value")?
+                    .parse()
+                    .map_err(|_| "--seconds must be an integer")?;
+            }
+            "--models" => models = PathBuf::from(args.next().ok_or("--models needs a directory")?),
+            "--check-runtime" => check_runtime = true,
+            _ => {
+                eprintln!("Unknown arguments. Use --help.");
+                std::process::exit(2);
+            }
+        }
+    }
+    lucas_app::script::validate_duration(seconds).map_err(str::to_owned)?;
+    #[cfg(windows)]
+    {
+        if check_runtime {
+            let verified =
+                lucas_gaze::models::VerifiedModels::load(&models).map_err(|e| e.to_string())?;
+            lucas_gaze::runtime::OrtBackend::new(verified).map_err(|e| e.to_string())?;
+            println!("Pinned models and ONNX Runtime loaded successfully.");
+            return Ok(());
+        }
+        debug_ui::run(seconds, models)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (seconds, models, check_runtime);
+        Err("the gaze debug window requires Windows; use cargo xtask replay <trace> here".into())
+    }
 }
 
 #[cfg(windows)]

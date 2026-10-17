@@ -104,6 +104,19 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Test workspace with MSVC
         run: cargo test --workspace
+      - name: Build ready-to-run diagnostics executable
+        run: cargo build --locked --release -p lucas-app
+      - name: Package and smoke-test the unpacked Windows bundle
+        timeout-minutes: 3
+        shell: pwsh
+        run: ./xtask/package-windows.ps1 -OutputDirectory "${{ runner.temp }}/lucas-package"
+      - name: Upload ready-to-run Windows build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lucas-windows-x64
+          path: ${{ runner.temp }}/lucas-package/lucas-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
       - name: Smoke-test overlay on the interactive desktop
         timeout-minutes: 3
         env:

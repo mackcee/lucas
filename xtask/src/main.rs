@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod models;
+mod replay;
 mod sim;
 
 #[cfg(test)]
@@ -11,6 +12,7 @@ use std::process::ExitCode;
 const HELP: &str = "LUCAS development tasks
 
 Usage: cargo xtask sim [options]
+       cargo xtask replay <trace.jsonl>
        cargo xtask models <verify [directory] | prepare [--python executable] [--output directory] [--compare reference-directory]>
 
 Simulate gamma(k=2) habitual gaps through lucas-core, with 300 ms glances.
@@ -44,6 +46,20 @@ fn main() -> ExitCode {
     {
         println!("{HELP}");
         return ExitCode::SUCCESS;
+    }
+    if command.as_deref() == Some("replay") {
+        let args: Vec<_> = args.collect();
+        if args.len() != 1 {
+            eprintln!("error: usage: cargo xtask replay <trace.jsonl>");
+            return ExitCode::from(2);
+        }
+        return match replay::run(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("replay failed: {error}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if command.as_deref() == Some("models") {
         return match models::run(args.collect()) {
