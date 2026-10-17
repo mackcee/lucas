@@ -42,7 +42,7 @@ jobs:
           restore-keys: |
             ort-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Reserve model-file cache
-        # Empty until the gaze/model chunk adds assets; never cache source or notices.
+        # Never cache source or notices; see models/README.md for asset provenance.
         # Model manifests/conversion tooling must live in models/ or xtask/ so edits
         # invalidate this key. Do not fall back to an older set of model files.
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -92,7 +92,7 @@ jobs:
           restore-keys: |
             ort-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Reserve model-file cache
-        # Same reserved assets/key inputs as Linux; model acquisition comes later.
+        # Same asset-cache constraints and key inputs as Linux above.
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

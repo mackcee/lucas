@@ -7,10 +7,11 @@ The two checked-in ONNX files are the CPU models used by `lucas-gaze`:
 | `face_detector.onnx` | `[1,128,128,3]`, `[-1,1]`, square letterbox | `regressors [1,896,16]`, `classificators [1,896,1]` (logits) |
 | `face_landmarks_detector.onnx` | `[1,256,256,3]`, `[0,1]`, rotated ROI | `Identity [1,1,1,1434]` (478 xyz points in crop pixels), `Identity_1` (presence logit), `Identity_2` (unused) |
 
-**No models are fetched at application runtime.** Ship these files beside the
-application's model directory. `VerifiedModels::load` checks them against the
+**No models are fetched at application runtime.** Ship these files in the
+directory passed to `VerifiedModels::load`, which checks them against the
 SHA-256 lock compiled into `lucas-gaze`, then hands the **same verified bytes** to
-ONNX Runtime. Missing or modified files fail closed with a repair hint.
+ONNX Runtime. Missing or modified files fail closed; restore the model files
+shipped with the matching application build rather than changing the lock.
 Replacing the on-disk lock cannot bypass verification. ONNX Runtime telemetry is
 explicitly disabled, and its runtime model-fetching feature is not enabled.
 

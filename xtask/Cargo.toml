@@ -10,4 +10,4 @@ publish = false
 
 [dependencies]
 lucas-core = { path = "../crates/lucas-core" }
-lucas-gaze = { path = "../crates/lucas-gaze", default-features = false }
+lucas-gaze = { version = "0.1.0", path = "../crates/lucas-gaze", default-features = false }

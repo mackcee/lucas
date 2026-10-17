@@ -36,9 +36,9 @@ network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
 Only settings, calibration, and per-game summaries (including event timestamps)
-will be stored locally. Raw webcam frames will not be stored. The current binary
-does not collect or persist any data. Developer build and dependency-check tools
-may access package registries and advisory databases.
+will be stored locally. Raw webcam frames will not be stored. The current `lucas`
+binary does not collect or persist any data. Developer build and dependency-check
+tools may access package registries and advisory databases.
 
 ## Build and check
 
