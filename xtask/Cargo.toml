@@ -5,8 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "LUCAS development tools and synthetic-player simulator."
+description = "LUCAS development tools, synthetic-player simulator, and offline model tooling."
 publish = false
 
 [dependencies]
 lucas-core = { path = "../crates/lucas-core" }
+lucas-gaze = { version = "0.1.0", path = "../crates/lucas-gaze", default-features = false }

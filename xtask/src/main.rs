@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod models;
 mod sim;
 
 #[cfg(test)]
@@ -10,6 +11,7 @@ use std::process::ExitCode;
 const HELP: &str = "LUCAS development tasks
 
 Usage: cargo xtask sim [options]
+       cargo xtask models <verify [directory] | prepare [--python executable] [--output directory] [--compare reference-directory]>
 
 Simulate gamma(k=2) habitual gaps through lucas-core, with 300 ms glances.
 Time is eligible play (no loading, deaths, tracking loss or pauses).
@@ -42,6 +44,15 @@ fn main() -> ExitCode {
     {
         println!("{HELP}");
         return ExitCode::SUCCESS;
+    }
+    if command.as_deref() == Some("models") {
+        return match models::run(args.collect()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        };
     }
     if command.as_deref() != Some("sim") {
         eprintln!("error: unknown task: {}\n\n{HELP}", command.unwrap());

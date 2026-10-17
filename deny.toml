@@ -1,7 +1,10 @@
 [advisories]
-# Consult the RustSec advisory database; do not suppress known advisories.
+# Consult the RustSec advisory database with explicitly approved exceptions.
 version = 2
-ignore = []
+ignore = [
+    # Unmaintained paste has no safe upgrade; required by nokhwa and nalgebra/simba.
+    "RUSTSEC-2024-0436",
+]
 unmaintained = "all"
 yanked = "deny"
 
@@ -20,6 +23,8 @@ allow = [
     "0BSD",
     "BSL-1.0",
     "CC0-1.0",
+    # Permissive data licence of webpki-roots via ONNX Runtime build tooling.
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]
