@@ -208,6 +208,9 @@ impl Runtime {
         }
         let Some(snapshot) = snapshot else {
             self.game.unavailable(at)?;
+            if let Some(session) = &mut self.session {
+                session.clock.unavailable();
+            }
             return Ok(());
         };
         let update = self.game.update(at, snapshot)?;

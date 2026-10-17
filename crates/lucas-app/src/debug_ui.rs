@@ -23,20 +23,26 @@ fn trace_directory() -> Result<PathBuf, String> {
 }
 
 pub fn run(seconds: u64, models: PathBuf) -> Result<(), String> {
-    run_impl(seconds, models, None).map(|_| ())
+    run_impl(seconds, models, None, None).map(|_| ())
 }
-pub fn run_calibration(models: PathBuf, quick: bool) -> Result<bool, String> {
+pub fn run_calibration(models: PathBuf, quick_snapshot: Option<String>) -> Result<bool, String> {
     run_impl(
         600,
         models,
-        Some(if quick {
+        Some(if quick_snapshot.is_some() {
             RunKind::Quick
         } else {
             RunKind::Calibrate
         }),
+        quick_snapshot,
     )
 }
-fn run_impl(seconds: u64, models: PathBuf, runtime_kind: Option<RunKind>) -> Result<bool, String> {
+fn run_impl(
+    seconds: u64,
+    models: PathBuf,
+    runtime_kind: Option<RunKind>,
+    quick_snapshot: Option<String>,
+) -> Result<bool, String> {
     let passed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let result = passed.clone();
     let options = eframe::NativeOptions {
@@ -78,6 +84,7 @@ fn run_impl(seconds: u64, models: PathBuf, runtime_kind: Option<RunKind>) -> Res
                 measurements: [531.0, 299.0, 650.0],
                 calibration_result: None,
                 runtime_kind,
+                quick_snapshot,
                 runtime_passed: result,
             };
             app.refresh_cameras();
@@ -162,6 +169,7 @@ struct DebugApp {
     measurements: [f64; 3],
     calibration_result: Option<String>,
     runtime_kind: Option<RunKind>,
+    quick_snapshot: Option<String>,
     runtime_passed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl DebugApp {
@@ -353,6 +361,14 @@ impl DebugApp {
                     }
                     let model = calibration::load(&lucas_store::Store::open().map_err(|e|e.to_string())?, &screen, script.screen().minimap)
                         .map_err(|e|e.to_string())?.ok_or("No passing calibration for this screen/minimap. Run full calibration first.")?;
+                    if let Some(expected) = &self.quick_snapshot {
+                        calibration::verify_quick_snapshot(
+                            &model,
+                            self.cameras[self.selected].index,
+                            expected,
+                        )
+                        .map_err(|e| e.to_string())?;
+                    }
                     Schedule::Quick(CalibrationScript::quick(&model), Box::new(model))
                 } else {
                     Schedule::Calibration(script)

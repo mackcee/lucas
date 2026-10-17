@@ -109,14 +109,27 @@ impl Desktop {
             return Ok(());
         }
         self.camera = None; // joined and released before the child can open it
+        if self.runtime.calibration() == CalibrationState::QuickCheck && self.runtime.in_session() {
+            self.reload()?;
+        }
         let quick = self.runtime.begin_calibration()?;
-        let child = Command::new(std::env::current_exe()?)
-            .arg(if quick {
-                "--runtime-quick"
-            } else {
-                "--runtime-calibrate"
-            })
-            .spawn()?;
+        let mut command = Command::new(std::env::current_exe()?);
+        if quick {
+            let model = self
+                .runtime
+                .model
+                .as_ref()
+                .ok_or("calibration unavailable")?;
+            command
+                .arg("--runtime-quick")
+                .arg(calibration::quick_snapshot_id(
+                    model,
+                    self.runtime.settings().camera_index,
+                ));
+        } else {
+            command.arg("--runtime-calibrate");
+        }
+        let child = command.spawn()?;
         self.calibration = Some(CalibrationTask {
             child,
             quick,

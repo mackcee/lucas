@@ -12,7 +12,10 @@ sound drive gaze coaching; no level selector or automatic promotion is added.
 - At every game start, choose **Quick check required (4 seconds)** in the tray.
   This deliberately uses a player-initiated window rather than stealing focus
   from League. Do it on the loading screen or before play; until it passes,
-  coaching remains off. It presents one minimap and one centre target.
+  coaching remains off. It presents one minimap and one centre target. The tray
+  reloads saved calibration before launching the check, and the child must match
+  the tray's weights/camera fingerprint before validating. Changes on disk during
+  the check cannot silently substitute a different coaching snapshot.
 - A failed/cancelled quick check latches **Calibration needed / recalibrate**.
   Old weights stay on disk but cannot enable coaching. Complete a new full fit,
   then the game's quick check. There is no implicit recalibration.

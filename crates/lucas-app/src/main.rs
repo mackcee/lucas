@@ -90,8 +90,11 @@ fn run() -> Result<(), String> {
             }
             "--models" => models = PathBuf::from(args.next().ok_or("--models needs a directory")?),
             "--check-runtime" => check_runtime = true,
-            "--runtime-calibrate" => runtime_calibration = Some(false),
-            "--runtime-quick" => runtime_calibration = Some(true),
+            "--runtime-calibrate" => runtime_calibration = Some(None),
+            "--runtime-quick" => {
+                runtime_calibration =
+                    Some(Some(args.next().ok_or("missing calibration snapshot")?));
+            }
             // Opens the shared diagnostics/calibration surface, never a camera
             // or recording until the player explicitly starts it.
             "--calibrate" => {}
@@ -104,8 +107,8 @@ fn run() -> Result<(), String> {
     lucas_app::script::validate_duration(seconds).map_err(str::to_owned)?;
     #[cfg(windows)]
     {
-        if let Some(quick) = runtime_calibration {
-            return if debug_ui::run_calibration(models, quick)? {
+        if let Some(quick_snapshot) = runtime_calibration {
+            return if debug_ui::run_calibration(models, quick_snapshot)? {
                 Ok(())
             } else {
                 Err("Calibration cancelled or failed; coaching remains paused".into())

@@ -245,6 +245,62 @@ fn replay_checks_pulses_unknown_spans_and_stored_blind_seen_unknown_deaths() {
 }
 
 #[test]
+fn failed_poll_makes_outage_deaths_unknown_but_preserves_earlier_evidence() {
+    let model = fitted();
+    let [l, t, r, b] = model.screen().minimap;
+    let map = [(l + r) / 2.0, (t + b) / 2.0];
+    let mut runtime = Runtime::new(Settings::default()).unwrap();
+    let deaths = vec![
+        event(1, 108.5, "ChampionKill"),
+        event(2, 110.25, "ChampionKill"),
+    ];
+    for ms in (0..=12000).step_by(50) {
+        let now = Duration::from_millis(ms);
+        if ms % 1000 == 0 {
+            let poll = match ms {
+                11000 => None,
+                12000 => Some(snapshot(111.0, false, deaths.clone())),
+                _ => Some(snapshot(100.0 + ms as f64 / 1000.0, false, vec![])),
+            };
+            runtime.poll(now, poll.as_ref(), ms).unwrap();
+            if ms == 0 {
+                ready(&mut runtime, model.clone());
+            }
+        }
+        let position = if (1000..1300).contains(&ms) {
+            map
+        } else {
+            [0.5, 0.5]
+        };
+        runtime
+            .tick(now, inputs(), Some(sample(ms, position)), ms)
+            .unwrap();
+    }
+    let mut events = deaths;
+    events.push(event(3, 112.0, "GameEnd"));
+    runtime
+        .poll(
+            Duration::from_secs(13),
+            Some(&snapshot(112.0, false, events)),
+            13000,
+        )
+        .unwrap();
+    let summaries = runtime.take_summaries();
+    assert_eq!(summaries.len(), 1);
+    assert_eq!(summaries[0].metrics.seen_deaths, 1);
+    assert_eq!(summaries[0].metrics.blind_deaths, 0);
+    assert_eq!(summaries[0].metrics.unknown_deaths, 1);
+    assert!(summaries[0].events.iter().any(|e| e.game_time_ms == 110250
+        && matches!(
+            e.kind,
+            StoredEventKind::Death {
+                classification: DeathClassification::Unknown,
+                ..
+            }
+        )));
+}
+
+#[test]
 fn calibration_needed_failed_quick_and_each_game_routing() {
     let mut runtime = Runtime::new(Settings::default()).unwrap();
     runtime
