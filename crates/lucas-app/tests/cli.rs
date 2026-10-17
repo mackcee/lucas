@@ -1,6 +1,33 @@
 use std::process::Command;
 
 #[test]
+fn postgame_requires_a_source() {
+    let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .arg("--show-postgame")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("Usage:"));
+}
+
+#[test]
+fn postgame_missing_database_fails_without_opening_a_window() {
+    let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .args([
+            "--show-postgame",
+            "this-directory-does-not-exist/games.sqlite3",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("No games.sqlite3")
+    );
+}
+
+#[test]
 fn prints_version() {
     let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
         .arg("--version")

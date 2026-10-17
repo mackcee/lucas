@@ -13,6 +13,10 @@ name = "lucas"
 path = "src/main.rs"
 
 [dependencies]
+eframe = { version = "0.36.0", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+egui_plot = "0.37.0"
+lucas-core = { path = "../lucas-core" }
+lucas-store = { path = "../lucas-store" }
 lucas-game = { path = "../lucas-game" }
 lucas-geometry = { path = "../lucas-geometry" }
 serde = { version = "1", features = ["derive"] }

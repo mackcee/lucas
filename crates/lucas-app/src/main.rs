@@ -5,7 +5,7 @@
 mod console;
 
 fn main() {
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
     match args.as_slice() {
         [] => return start_timer(),
         [flag] if flag == "--timer" => return start_timer(),
@@ -14,11 +14,23 @@ fn main() {
     #[cfg(windows)]
     console::attach_parent();
 
+    if args.first().is_some_and(|flag| flag == "--show-postgame") {
+        let source = args.get(1).filter(|_| args.len() == 2).unwrap_or_else(|| {
+            eprintln!("Usage: lucas --show-postgame <demo|games.sqlite3|data-directory>");
+            std::process::exit(2);
+        });
+        if let Err(error) = lucas_app::postgame::run_dev(source) {
+            eprintln!("Cannot show post-game summary: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     match args.as_slice() {
         [flag] if flag == "--version" || flag == "-V" => version(),
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "LUCAS\n\nUsage: lucas [--timer | --version | --help]\n\nOn Windows, no arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder."
+                "LUCAS\n\nUsage: lucas [--timer | --show-postgame <demo|games.sqlite3|data-directory> | --version | --help]\n\nOn Windows, no arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder."
             );
         }
         _ => {
