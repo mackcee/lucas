@@ -255,6 +255,8 @@ impl Store {
             "games.sqlite3-shm",
             "games.sqlite3-journal",
             "settings.toml",
+            "alignment.toml",
+            "alignment.toml.tmp",
             "calibration.json",
             "traces",
             "reports",
