@@ -196,7 +196,10 @@ fn shared_deletion_resets_timer_alignment_and_preserves_unrelated_files() {
     );
     assert_eq!(fs::read_dir(folder.path()).unwrap().count(), 2);
     for name in ["unrelated.txt", "alignment.toml.backup"] {
-        assert_eq!(fs::read_to_string(folder.path().join(name)).unwrap(), "keep");
+        assert_eq!(
+            fs::read_to_string(folder.path().join(name)).unwrap(),
+            "keep"
+        );
     }
 }
 
