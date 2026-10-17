@@ -44,8 +44,9 @@ belongs to the caller, keyed by client resolution, MinimapScale and flip.
 
 `parse_persisted_settings` reads supplied `PersistedSettings.json` content from
 `files[name=game.cfg].sections[name=HUD].settings[{name,value}]`.
-`parse_game_cfg` reads supplied `[HUD]` entries. Locating/reading files and deciding
-when to refresh them belongs to `lucas-game`.
+`parse_game_cfg` reads supplied `[HUD]` entries. File discovery and reading belong
+to [`lucas-game`](../lucas-game/README.md#settings-and-windows); the application
+owns refresh scheduling.
 
 Both return a `SettingsPatch` with optional values: missing is different from
 zero or false. Prefer the persisted patch and fill missing fields from game.cfg
