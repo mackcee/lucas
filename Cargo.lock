@@ -2258,6 +2258,8 @@ version = "0.1.0"
 dependencies = [
  "cpu-time",
  "image",
+ "lucas-core",
+ "lucas-geometry",
  "nalgebra",
  "nokhwa",
  "ort",

@@ -148,8 +148,15 @@ unknown eyes, or low fps are reasons to adjust lighting and placement first.
 Repeat once at night because lighting varies. If offline evaluation misses the
 G2 criterion (at least 90% of deliberate minimap glances detected, at most one
 false detection per minute of not looking), try the C270 near the minimap corner
-and repeat, identifying the new position in the note. Detection-rate evaluation
-and fitting are M5.1; this build does not claim that the criterion has passed.
+and repeat, identifying the new position in the note. Run `cargo xtask eval
+<path-to-trace.jsonl>` for detection-rate evaluation; see the
+[G2 evaluator](../xtask/README.md#g2-calibration-and-glance-evaluation) for separate
+calibration recordings, physical monitor dimensions and scoring rules. Synthetic
+tests do not establish real-webcam G2 acceptance.
+
+For in-app calibration and **Quick check**, follow the
+[calibration guide](../crates/lucas-app/README.md#in-app-calibration), including
+physical monitor measurements, saved alignment and when to recalibrate.
 
 ### Troubleshooting / development
 

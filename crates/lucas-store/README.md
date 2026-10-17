@@ -11,10 +11,11 @@ A missing `LOCALAPPDATA` is an error, not a fallback into the working directory.
   versions return errors and are never silently replaced. Defaults are an amber
   ripple, sound off, Live Client gate and window-only fallback on, and the first
   10-second ramp level. Settings changes replace the file atomically.
-- `calibration.json`: versioned opaque model bytes (1–65536 bytes; normally about
-  1 KB), virtual-desktop physical screen geometry, creation time in Unix
-  milliseconds, and optional validation error in degrees. No calibration samples
-  or camera frames. Writes replace the file atomically.
+- `calibration.json`: versioned opaque model bytes (1–65536 bytes), virtual-desktop
+  physical screen geometry, creation time in Unix milliseconds, and optional
+  validation error in degrees. The payload is owned by
+  [`lucas-gaze`](../lucas-gaze/README.md#per-user-calibration-m51).
+  No calibration samples or camera frames. Writes replace the file atomically.
 - `games.sqlite3`: bundled SQLite, with transactional `PRAGMA user_version`
   migrations. Version 1 has one `games` row per game ID; `snapshot_json` contains
   the complete core metrics, role/champion, length, initial/current level,

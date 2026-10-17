@@ -1,7 +1,7 @@
-# lucas-gaze (M4.1)
+# lucas-gaze
 
-Offline, single-player webcam → landmarks → filtered gaze features. This crate
-**does not classify minimap looks**: its samples are inputs to later calibration.
+Offline, single-player webcam → landmarks → filtered gaze features → per-user
+minimap classifier. Camera capture remains independent of calibration and decisions.
 
 - `Camera::capture` fills caller-owned RGB8 storage; `false` means end-of-source.
 - `NokhwaCamera` (Windows/default `camera` feature) uses synchronous Media
@@ -29,8 +29,8 @@ Offline, single-player webcam → landmarks → filtered gaze features. This cra
 - Feature vectors contain each iris in its eye-corner/lid coordinate system,
   aperture, canonical-fit yaw/pitch/roll and inverse relative face scale. The
   latter is not distance in metres. One-Euro filters use monotonic timestamps
-  and reset on loss/gaps. Mirroring, screen coordinates, calibration, off-screen
-  classification and dwell detection are the caller's later-stage responsibilities.
+  and reset on loss/gaps. `calibration` maps these unmirrored features into screen
+  coordinates and minimap probability; `decision` bridges into the core detector.
 
 ## Construct on a dedicated worker thread (Windows)
 
@@ -53,6 +53,44 @@ while let Some(sample) = source.next_sample()? {
 
 Use `--no-default-features` for math/replay only. Default Linux builds run fixture
 inference but never open a live camera; the MVP capture backend is Windows only.
+
+## Per-user calibration (M5.1)
+
+`calibration::fit(training, validation, screen, options)` standardizes the ten
+features using **training-only** means/stddevs and fits an L2-regularized,
+class-balanced logistic classifier plus two ridge regressors (screen x/y).
+Supply distinct target occurrences to fit and threshold validation; never split
+adjacent frames from one fixation between them. Both classes need at least 12
+usable samples in each set. Defaults: regularization 0.01, empirical target
+per-frame FPR 0.001. Thresholds are at least 0.5; boundary ties are excluded.
+
+The held-out mean angular error is measured between screen rays using physical
+monitor dimensions and an explicitly recorded assumed viewing distance. The
+minimap zone is inflated by that error via `lucas-geometry`, clipped to screen.
+`predict` returns `None` for no features, closed eyes, low quality (<0.5), extreme
+head angles, or an off-screen ridge estimate. The inflated zone is a guard on
+logistic positives, **never** a second way to create checks. Point estimates are
+diagnostic, not precise screen gaze. Webcam off-screen rejection is a heuristic;
+real recordings, especially boundary looks, remain essential.
+
+`decision::CalibratedDetector` uses the existing `lucas-core::GlanceDetector`:
+>=3 consecutive samples AND >=100 ms, exit at 75% of the fitted enter threshold,
+250 ms maximum sample gap. Unknown interrupts a candidate/confirmed glance.
+No core configuration or game-loop behavior is changed by calibration.
+
+`CalibrationModel::{to_bytes,from_bytes}` own the versioned binary payload;
+see their [serialization implementation](src/calibration.rs) for the layout and
+validation rules. It retains weights, geometry/distance assumptions and validation
+aggregates, not training samples. The [store calibration file](../lucas-store/README.md#files-and-schema)
+wraps these bytes and desktop geometry; JSON byte-array expansion makes the
+containing file larger. Unknown versions, wrong lengths, invalid geometry and
+nonfinite weights fail closed.
+
+Short calibration validation passes at >=90% per-frame sensitivity, empirical
+FPR <= target, >=80% usable frames and <=5° mean error. This is a local quality
+screen, **not G2 acceptance**: short, correlated samples cannot establish an
+unseen-population false-positive bound. `cargo xtask eval` measures held-out
+**glance events** and false detections/minute on longer recordings instead.
 
 ## Privacy boundary
 
