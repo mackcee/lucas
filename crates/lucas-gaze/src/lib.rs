@@ -1,7 +1,8 @@
 //! Offline webcam-to-feature pipeline. No network, frame serialization, or logging.
 //!
 //! Coordinates refer to the **unmirrored** camera image, not the screen. Feature
-//! samples are not gaze classifications; calibration and dwell belong to M5.
+//! samples require downstream calibration/classification before `lucas-core` can
+//! apply its dwell detector.
 
 #![forbid(unsafe_code)]
 
