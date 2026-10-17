@@ -25,8 +25,12 @@ offline face/iris landmarks and filtered gaze features. **M3.2 wires the Windows
 `lucas` binary into a tray timer app**: a ten-second amber reminder, Live Client
 alive/game gating (with explicit window-only fallback), minimap alignment and
 numeric geometry reports. See the [G1 Windows checklist](docs/testing-on-windows.md#g1--timer-mode-and-minimap-alignment-about-15-minutes).
-Timer mode does not open a camera. Gaze-driven coaching, calibration and per-game
-storage are not wired into it yet.
+**M6.1 adds local persistence in [`lucas-store`](crates/lucas-store/README.md) and a
+standalone [post-game summary card](crates/lucas-app/README.md)**. Without arguments,
+`lucas` starts timer mode on Windows; the viewer below opens synthetic or saved
+summaries. Timer mode does not open a camera. Gaze-driven coaching, calibration
+and per-game storage are not wired into it yet, so games are not automatically
+recorded and the card does not open at game end.
 
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
@@ -39,12 +43,15 @@ leave RAM and are never written to disk. Nothing is sent off the machine. The on
 network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
-Only settings, calibration, and per-game summaries (including event timestamps)
-will be stored locally. Raw webcam frames will not be stored. Timer mode currently
-persists only alignment profiles and user-requested numeric geometry reports in
-`%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only mode
-disables polling (an already-running request may finish). Developer build and
-dependency-check tools may access package registries and advisory databases.
+Local persistence is limited to settings, calibration, and per-game summaries
+(including event timestamps); see the [storage reference](crates/lucas-store/README.md)
+for files and deletion scope. The current viewer can open and delete saved data,
+but does not capture games. Demo mode uses only unsaved synthetic data.
+Timer mode currently persists only alignment profiles and user-requested numeric
+geometry reports in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game
+API; window-only mode disables polling (an already-running request may finish).
+Developer build and dependency-check tools may access package registries and
+advisory databases.
 
 ## Build and check
 
@@ -70,6 +77,22 @@ The first build may download the pinned toolchain and the ONNX Runtime library. 
 licenses, sources, bans, and RustSec advisories; its initial check requires network
 access to fetch the advisory database.
 
+### Preview the post-game card
+
+```sh
+# Synthetic inputs; no camera, network or real data opened.
+cargo run -p lucas-app -- --show-postgame demo
+
+# Latest saved game, quoting paths that contain spaces:
+lucas --show-postgame "C:\Users\you\AppData\Local\lucas\games.sqlite3"
+# The data directory is accepted instead of the database path.
+```
+
+The saved-game command requires an existing database containing a summary.
+The card provides **Open data folder** (Windows) and **Delete all data** controls;
+demo mode disables both. See the [card reference](crates/lucas-app/README.md) for
+metric interpretation and integration.
+
 ### Workspace
 
 | Crate | Responsibility |
@@ -80,7 +103,7 @@ access to fetch the advisory database.
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
-| `lucas-app` | `lucas` binary, Windows timer tray, alignment and numeric reports |
+| `lucas-app` | `lucas` binary, Windows timer tray, alignment, numeric reports and post-game card |
 | `xtask` | Synthetic-player simulator, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
@@ -97,3 +120,5 @@ Licensed under either of
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option. Third-party MediaPipe models remain Apache-2.0; see [NOTICE](NOTICE).
+For bundled UI font notices and distribution requirements, see the
+[card reference](crates/lucas-app/README.md).

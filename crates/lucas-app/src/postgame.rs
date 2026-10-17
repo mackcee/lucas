@@ -244,13 +244,7 @@ fn render_summary(ui: &mut egui::Ui, summary: &GameSummary, probes: &[ProbePoint
                         "{:.0}% of the classification window tracked",
                         tracked_fraction * 100.0
                     ));
-                    death_timeline(
-                        ui,
-                        summary,
-                        index,
-                        event.game_time_ms,
-                        colour,
-                    );
+                    death_timeline(ui, summary, index, event.game_time_ms, colour);
                 });
             }
         }

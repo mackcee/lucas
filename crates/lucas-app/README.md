@@ -3,14 +3,8 @@
 This chunk adds `lucas_app::postgame`, independent of the tray, camera debug
 window, and future game loop. It never opens automatically during play.
 
-```sh
-# Synthetic inputs run through lucas-core; no camera, network or real data opened.
-cargo run -p lucas-app -- --show-postgame demo
-
-# Latest saved game, with the path quoted when it contains spaces:
-lucas --show-postgame "C:\Users\you\AppData\Local\lucas\games.sqlite3"
-# Its data directory is accepted as well.
-```
+See the root README's [viewer commands](../../README.md#preview-the-post-game-card)
+for synthetic and saved-game previews.
 
 An empty or missing database produces an explanatory error without launching a
 window. The native UI targets Windows; Linux builds/headless tests and Xvfb are
@@ -33,16 +27,19 @@ remain the later loop's responsibility. Stop trace/report writers and release
 other database handles first: ownership transfers into the card so **Delete all
 data** can close SQLite before deleting files. Deletion requires a second,
 explicit confirmation and clears the in-memory card on success. If deleting
-fails, the UI reports that it may be incomplete and how to retry.
+fails, keep the card open, close other LUCAS windows, and choose **Delete all data**
+again. The card can retry even if the database or summary has already been removed.
 
 ## Reading the card
 
 - C uses core's **eligible time**, not all elapsed game time. Undefined C is shown
   as unavailable; tracking quality and the amount of eligible time remain visible.
 - Blind / total includes unknown deaths in the total but never in the blind count.
-  Each expandable death row gives its evidence gap, classification-window
-  coverage, and timeline of checks/pulses relative to death. Unknown gaps are
-  explicitly uncertain; no earlier evidence is not fabricated as a zero gap.
+  Each expandable death row gives its elapsed evidence gap, classification-window
+  coverage, and timeline of checks/pulses in game seconds relative to death.
+  The elapsed gap is shown separately, not as a band on the pause-aware timeline.
+  Unknown gaps are explicitly uncertain; no earlier evidence is not fabricated
+  as a zero gap.
 - Probe lines require at least two measured probes. Lines join only consecutive
   fixed-standard probes with the same goal; missing or changed goals break the
   line. Low tracking gets a warning. These are raw observations, not a promotion

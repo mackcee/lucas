@@ -46,9 +46,10 @@ store.save_summary(&summary)?;
 The caller supplies `GameContext` (including actual valid/total frame counts),
 finalizes delayed/deduplicated deaths before finishing the core session, and
 provides a **pause-aware** mapping for every retained event. Do not pass a guessed
-wall-clock offset; absent mappings fail the build rather than store false game
-timestamps. Core owns death classification and the elapsed evidence-gap value;
-this crate does not reclassify deaths or derive frame quality from check counts.
+wall-clock offset; absent mappings make `GameSummary::from_session` return an
+error rather than store false game timestamps. Core owns death classification and
+the elapsed evidence-gap value; this crate does not reclassify deaths or derive
+frame quality from check counts.
 `deaths_available = false` distinguishes window-only mode from zero deaths.
 `standard_changed` keeps mid-game goal changes out of fixed-goal trend lines.
 Automatic promotion, game-clock alignment, and probe scheduling are not part of
