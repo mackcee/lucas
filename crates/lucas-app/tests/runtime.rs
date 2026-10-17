@@ -293,6 +293,153 @@ fn calibration_needed_failed_quick_and_each_game_routing() {
 }
 
 #[test]
+fn full_recalibration_revokes_readiness_until_fit_and_quick_check_succeed() {
+    let mut runtime = Runtime::new(Settings::default()).unwrap();
+    runtime
+        .poll(Duration::ZERO, Some(&snapshot(100.0, false, vec![])), 0)
+        .unwrap();
+    ready(&mut runtime, fitted());
+    assert!(!runtime.begin_calibration().unwrap());
+    assert_eq!(runtime.calibration(), CalibrationState::Needed);
+    runtime.revalidated(true).unwrap();
+    for ms in 1..=300 {
+        let tick = runtime
+            .tick(
+                Duration::from_millis(ms),
+                inputs(),
+                Some(sample(ms, [0.5, 0.5])),
+                ms,
+            )
+            .unwrap();
+        assert_eq!(tick.status, Status::CalibrationNeeded);
+        assert!(tick.hide);
+        assert!(tick.pulse.is_none());
+        assert_eq!(tick.gap_ms, 0);
+    }
+    runtime.install_calibration(Some(fitted())).unwrap();
+    assert_eq!(runtime.calibration(), CalibrationState::QuickCheck);
+    assert!(runtime.begin_calibration().unwrap());
+    runtime.revalidated(true).unwrap();
+    assert_eq!(runtime.calibration(), CalibrationState::Ready);
+}
+
+#[test]
+fn reconnect_after_window_loss_starts_a_revalidated_session_without_replaying_deaths() {
+    let mut runtime = Runtime::new(Settings::default()).unwrap();
+    let death = event(1, 99.0, "ChampionKill");
+    runtime
+        .poll(
+            Duration::ZERO,
+            Some(&snapshot(100.0, false, vec![death.clone()])),
+            0,
+        )
+        .unwrap();
+    ready(&mut runtime, fitted());
+    runtime.poll(Duration::from_secs(1), None, 1000).unwrap();
+    runtime
+        .tick(Duration::from_secs(1), Inputs::default(), None, 1000)
+        .unwrap();
+    assert!(!runtime.in_session());
+    assert!(runtime.postgame_ready());
+    assert_eq!(runtime.take_summaries().len(), 1);
+
+    runtime
+        .poll(
+            Duration::from_secs(2),
+            Some(&snapshot(102.0, false, vec![death.clone()])),
+            2000,
+        )
+        .unwrap();
+    assert!(runtime.in_session());
+    assert!(!runtime.postgame_ready());
+    assert!(runtime.camera_wanted(true, true, false));
+    assert_eq!(runtime.calibration(), CalibrationState::QuickCheck);
+    let tick = runtime
+        .tick(
+            Duration::from_secs(2),
+            inputs(),
+            Some(sample(2000, [0.5, 0.5])),
+            2000,
+        )
+        .unwrap();
+    assert_eq!(tick.status, Status::QuickCheckNeeded);
+    assert!(tick.hide);
+    runtime
+        .poll(
+            Duration::from_secs(3),
+            Some(&snapshot(
+                103.0,
+                false,
+                vec![death, event(2, 103.0, "GameEnd")],
+            )),
+            3000,
+        )
+        .unwrap();
+    let summaries = runtime.take_summaries();
+    assert_eq!(summaries.len(), 1);
+    assert!(
+        !summaries[0]
+            .events
+            .iter()
+            .any(|e| matches!(e.kind, StoredEventKind::Death { .. }))
+    );
+    runtime
+        .poll(
+            Duration::from_secs(4),
+            Some(&snapshot(104.0, false, vec![event(2, 103.0, "GameEnd")])),
+            4000,
+        )
+        .unwrap();
+    assert!(!runtime.in_session());
+    assert!(runtime.take_summaries().is_empty());
+}
+
+#[test]
+fn gate_transitions_defer_postgame_until_window_loss_or_game_end() {
+    for reconnect in [false, true] {
+        let mut runtime = Runtime::new(Settings {
+            live_client_gate: false,
+            ..Settings::default()
+        })
+        .unwrap();
+        runtime.tick(Duration::ZERO, inputs(), None, 0).unwrap();
+        runtime
+            .set_live_gate(true, Duration::from_secs(1), 1000)
+            .unwrap();
+        assert!(!runtime.in_session());
+        assert_eq!(runtime.take_summaries().len(), 1);
+        assert!(!runtime.postgame_ready());
+        runtime.poll(Duration::from_secs(2), None, 2000).unwrap();
+        runtime
+            .tick(Duration::from_secs(2), inputs(), None, 2000)
+            .unwrap();
+        assert!(!runtime.postgame_ready());
+        if reconnect {
+            runtime
+                .poll(
+                    Duration::from_secs(3),
+                    Some(&snapshot(103.0, false, vec![])),
+                    3000,
+                )
+                .unwrap();
+            assert!(!runtime.postgame_ready());
+            runtime
+                .poll(
+                    Duration::from_secs(4),
+                    Some(&snapshot(104.0, false, vec![event(1, 104.0, "GameEnd")])),
+                    4000,
+                )
+                .unwrap();
+        } else {
+            runtime
+                .tick(Duration::from_secs(3), Inputs::default(), None, 3000)
+                .unwrap();
+        }
+        assert!(runtime.postgame_ready());
+    }
+}
+
+#[test]
 fn unknown_dwell_stale_frames_offscreen_closed_eyes_and_gate_pauses() {
     let model = fitted();
     let [l, t, r, b] = model.screen().minimap;

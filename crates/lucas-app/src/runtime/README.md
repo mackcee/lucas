@@ -70,9 +70,11 @@ summaries/check/pulse/death timestamps go through `lucas-store`, never frames or
 per-frame runtime features. Timer fallback pulses also count as assistance.
 
 At game end the summary/events are saved, then a separate post-game process opens
-the exact saved game. The tray holds no database handle while the card is open,
-allowing its deletion control to close/delete SQLite. Cards are suppressed/closed
-when another game starts. Calibration and post-game children close on tray exit.
+the exact saved game. Gate-mode changes defer presentation until game end.
+The card's deletion control requests tray shutdown; the tray releases workers,
+children and cached state before deleting data. Restart LUCAS to begin fresh.
+Cards are suppressed/closed when another game starts. Calibration and post-game
+children close on tray exit.
 
 Portable replay coverage is in `tests/runtime.rs`: synthetic gaze plus scripted
 API states, checks and jitter bounds, no-face/off-screen/closed-eye spans,

@@ -75,6 +75,7 @@ pub struct Runtime {
     eligible_since: Duration,
     sequence: u64,
     summaries: Vec<GameSummary>,
+    postgame_ready: bool,
 }
 impl Runtime {
     pub fn new(settings: Settings) -> lucas_store::Result<Self> {
@@ -92,6 +93,7 @@ impl Runtime {
             eligible_since: Duration::ZERO,
             sequence: 0,
             summaries: Vec::new(),
+            postgame_ready: false,
         })
     }
     pub fn calibration(&self) -> CalibrationState {
@@ -111,6 +113,16 @@ impl Runtime {
     }
     pub fn take_summaries(&mut self) -> Vec<GameSummary> {
         std::mem::take(&mut self.summaries)
+    }
+    pub fn postgame_ready(&self) -> bool {
+        self.postgame_ready && !self.in_session()
+    }
+    pub fn begin_calibration(&mut self) -> Result<bool, CoreError> {
+        let quick = self.calibration == CalibrationState::QuickCheck && self.in_session();
+        if !quick {
+            self.install_calibration(None)?;
+        }
+        Ok(quick)
     }
 
     pub fn install_calibration(
@@ -178,6 +190,7 @@ impl Runtime {
             self.finish(at, unix_ms)?;
             self.game.reset();
             self.settings.live_client_gate = enabled;
+            self.postgame_ready = false;
         }
         Ok(())
     }
@@ -198,7 +211,10 @@ impl Runtime {
             return Ok(());
         };
         let update = self.game.update(at, snapshot)?;
-        if update.session_started {
+        if update.session_started
+            || (self.session.is_none()
+                && !matches!(self.game.phase(), GamePhase::NoGame | GamePhase::Ended))
+        {
             self.finish(at, unix_ms)?;
             self.start(at, unix_ms, true)?;
         }
@@ -211,6 +227,7 @@ impl Runtime {
         }
         if update.game_end {
             self.finish(at, unix_ms)?;
+            self.postgame_ready = true;
         }
         Ok(())
     }
@@ -221,6 +238,7 @@ impl Runtime {
         deaths_available: bool,
     ) -> Result<(), CoreError> {
         self.sequence += 1;
+        self.postgame_ready = false;
         let level = TRAINING_LEVELS[self.settings.level_index];
         let config = SessionConfig {
             density_cap: self.settings.density_cap,
@@ -262,6 +280,7 @@ impl Runtime {
         }
         if !input.window_exists && (!self.settings.live_client_gate || !self.game.api_available()) {
             self.finish(now, unix_ms)?;
+            self.postgame_ready = true;
         }
         let e = self.game.eligibility(now);
         let base = if self.settings.live_client_gate {

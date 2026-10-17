@@ -21,6 +21,7 @@ pub struct Desktop {
     camera: Option<CameraWorker>,
     calibration: Option<CalibrationTask>,
     card: Option<Child>,
+    delete_requested: bool,
     geometry: Option<(ScreenGeometry, [f64; 4])>,
     generation: u64,
     origin: Instant,
@@ -43,6 +44,7 @@ impl Desktop {
             camera: None,
             calibration: None,
             card: None,
+            delete_requested: false,
             geometry: None,
             generation: 0,
             origin,
@@ -82,7 +84,9 @@ impl Desktop {
         if self.geometry.as_ref() != Some(&geometry) {
             self.generation += 1;
             self.geometry = Some(geometry);
-            self.reload()?;
+            if self.runtime.calibration() != CalibrationState::Needed && !self.calibrating() {
+                self.reload()?;
+            }
         }
         Ok(())
     }
@@ -105,8 +109,7 @@ impl Desktop {
             return Ok(());
         }
         self.camera = None; // joined and released before the child can open it
-        let quick =
-            self.runtime.calibration() == CalibrationState::QuickCheck && self.runtime.in_session();
+        let quick = self.runtime.begin_calibration()?;
         let child = Command::new(std::env::current_exe()?)
             .arg(if quick {
                 "--runtime-quick"
@@ -156,6 +159,8 @@ impl Desktop {
         self.pending.extend(self.runtime.take_summaries());
         if !self.runtime.in_session() {
             self.camera = None;
+        }
+        if self.runtime.postgame_ready() {
             for summary in &self.pending {
                 Store::open()?.save_summary(summary)?;
             }
@@ -169,15 +174,28 @@ impl Desktop {
                 );
             }
             self.pending.clear();
-        } else {
+        } else if self.runtime.in_session() {
             self.close_card();
         }
         Ok(tick)
     }
+    pub fn deletion_requested(&mut self) -> Result<bool> {
+        if let Some(child) = &mut self.card
+            && let Some(status) = child.try_wait()?
+        {
+            self.card = None;
+            self.delete_requested |=
+                status.code() == Some(crate::postgame::DELETE_REQUESTED_EXIT_CODE as i32);
+        }
+        Ok(self.delete_requested)
+    }
     fn close_card(&mut self) {
         if let Some(mut child) = self.card.take() {
             let _ = child.kill();
-            let _ = child.wait();
+            if let Ok(status) = child.wait() {
+                self.delete_requested |=
+                    status.code() == Some(crate::postgame::DELETE_REQUESTED_EXIT_CODE as i32);
+            }
         }
     }
 }

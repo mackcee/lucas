@@ -5,7 +5,15 @@ use eframe::egui::{self, Color32, RichText};
 use egui_plot::{Legend, Line, MarkerShape, Plot, Points, VLine};
 use lucas_core::{DeathClassification, Phase, Salience, TrainingLevel};
 use lucas_store::{GameSummary, ProbePoint, Store, StoredEventKind};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+pub const DELETE_REQUESTED_EXIT_CODE: u8 = 42;
 
 const AMBER: Color32 = Color32::from_rgb(255, 191, 96);
 const SEEN: Color32 = Color32::from_rgb(118, 211, 205);
@@ -18,6 +26,7 @@ pub struct PostGameCard {
     data_folder: Option<PathBuf>,
     demo: bool,
     confirm_delete: bool,
+    delete_request: Option<Arc<AtomicBool>>,
     notice: Option<String>,
 }
 
@@ -36,6 +45,7 @@ impl PostGameCard {
             store: Some(store),
             demo: false,
             confirm_delete: false,
+            delete_request: None,
             notice: None,
         })
     }
@@ -48,11 +58,17 @@ impl PostGameCard {
             data_folder: None,
             demo: true,
             confirm_delete: false,
+            delete_request: None,
             notice: None,
         }
     }
 
     fn delete_data(&mut self) {
+        if let Some(request) = &self.delete_request {
+            self.store = None;
+            request.store(true, Ordering::Release);
+            return;
+        }
         let Some(directory) = &self.data_folder else {
             return;
         };
@@ -112,6 +128,9 @@ impl PostGameCard {
             if self.confirm_delete {
                 ui.add_space(8.0);
                 ui.label("Permanently delete settings, calibration, all game summaries, traces and reports? This cannot be undone.");
+                if self.delete_request.is_some() {
+                    ui.label("LUCAS will quit before deleting data. Restart it to begin with fresh settings and calibration.");
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Cancel").clicked() { self.confirm_delete = false; }
                     if ui.button("Permanently delete all data").clicked() {
@@ -122,7 +141,23 @@ impl PostGameCard {
             }
             if let Some(notice) = &self.notice { ui.label(RichText::new(notice).color(AMBER)); }
         });
+        if self
+            .delete_request
+            .as_ref()
+            .is_some_and(|r| r.load(Ordering::Acquire))
+        {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
+}
+
+pub fn show_runtime_postgame(game_id: &str) -> Result<bool, String> {
+    let request = Arc::new(AtomicBool::new(false));
+    let store = Store::open().map_err(|e| e.to_string())?;
+    let mut card = PostGameCard::from_store(store, game_id).map_err(|e| e.to_string())?;
+    card.delete_request = Some(Arc::clone(&request));
+    show_postgame(card).map_err(|e| e.to_string())?;
+    Ok(request.load(Ordering::Acquire))
 }
 
 impl eframe::App for PostGameCard {

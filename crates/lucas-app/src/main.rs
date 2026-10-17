@@ -33,6 +33,26 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    if args
+        .first()
+        .is_some_and(|flag| flag == "--runtime-postgame")
+    {
+        let result = args
+            .get(1)
+            .filter(|_| args.len() == 2)
+            .and_then(|id| id.to_str())
+            .ok_or_else(|| "missing game ID".to_owned())
+            .and_then(lucas_app::postgame::show_runtime_postgame);
+        return match result {
+            Ok(true) => ExitCode::from(lucas_app::postgame::DELETE_REQUESTED_EXIT_CODE),
+            Ok(false) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Cannot show post-game summary: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -72,13 +92,6 @@ fn run() -> Result<(), String> {
             "--check-runtime" => check_runtime = true,
             "--runtime-calibrate" => runtime_calibration = Some(false),
             "--runtime-quick" => runtime_calibration = Some(true),
-            "--runtime-postgame" => {
-                let id = args.next().ok_or("missing game ID")?;
-                let store = lucas_store::Store::open().map_err(|e| e.to_string())?;
-                let card = lucas_app::postgame::PostGameCard::from_store(store, &id)
-                    .map_err(|e| e.to_string())?;
-                return lucas_app::postgame::show_postgame(card).map_err(|e| e.to_string());
-            }
             // Opens the shared diagnostics/calibration surface, never a camera
             // or recording until the player explicitly starts it.
             "--calibrate" => {}

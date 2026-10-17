@@ -45,10 +45,17 @@ pub fn run() -> Result<()> {
 pub fn run_timer() -> Result<()> {
     run_mode(true)
 }
-fn run_mode(mut timer_mode: bool) -> Result<()> {
+fn run_mode(timer_mode: bool) -> Result<()> {
     let Some(_instance) = SingleInstance::acquire()? else {
         return Ok(());
     };
+    if run_session(timer_mode)? {
+        lucas_store::Store::open()?.delete_all_data()?;
+    }
+    Ok(())
+}
+
+fn run_session(mut timer_mode: bool) -> Result<bool> {
     // SAFETY: before any tray or overlay window on this thread. Physical window
     // geometry must not be DPI virtualized. The overlay sets its own thread DPI.
     if unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }.is_null()
@@ -117,6 +124,7 @@ fn run_mode(mut timer_mode: bool) -> Result<()> {
         .build()?;
     let mut last_status = String::new();
     let mut quit_requested = false;
+    let mut delete_requested = false;
     let mut last_tick = origin.elapsed();
     // Compare the calibration display even before a game window exists, so a
     // changed monitor/DPI/alignment routes startup back to calibration.
@@ -140,6 +148,10 @@ fn run_mode(mut timer_mode: bool) -> Result<()> {
     }
 
     while !quit_requested {
+        if gaze.deletion_requested()? {
+            delete_requested = true;
+            break;
+        }
         let mut keys = Vec::new();
         // SAFETY: dispatch only this thread's messages. No hooks or synthesized
         // input. The native tray menu needs a continuously serviced Win32 queue.
@@ -527,7 +539,7 @@ fn run_mode(mut timer_mode: bool) -> Result<()> {
     drop(gaze);
     drop(worker);
     drop(tray);
-    Ok(())
+    Ok(delete_requested)
 }
 
 fn primary_screen() -> Option<lucas_store::ScreenGeometry> {
