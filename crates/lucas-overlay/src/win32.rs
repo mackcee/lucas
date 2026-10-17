@@ -40,6 +40,37 @@ pub struct Options {
     pub exclude_from_capture: bool,
 }
 
+pub trait TargetEligibility: Send + 'static {
+    fn check(&self) -> Result<()>;
+}
+
+pub struct TargetWindow(usize);
+
+impl TargetWindow {
+    pub fn new(window: HWND) -> Self {
+        Self(window as usize)
+    }
+}
+
+impl TargetEligibility for TargetWindow {
+    fn check(&self) -> Result<()> {
+        let window = self.0 as HWND;
+        unsafe {
+            if IsWindow(window) == 0
+                || IsWindowVisible(window) == 0
+                || IsIconic(window) != 0
+                || GetForegroundWindow() != window
+            {
+                return Err(OverlayError::TargetNotForeground);
+            }
+            if is_exclusive_fullscreen(window)? {
+                return Err(OverlayError::ExclusiveFullscreen);
+            }
+        }
+        Ok(())
+    }
+}
+
 enum Command {
     Show(Pulse),
     Hide,
@@ -63,7 +94,11 @@ pub struct Win32Overlay {
 }
 
 impl Win32Overlay {
-    pub fn new(target: Rect, options: Options) -> Result<Self> {
+    pub fn new(
+        target: Rect,
+        eligibility: impl TargetEligibility,
+        options: Options,
+    ) -> Result<Self> {
         Surface::for_target(target)?;
         let (sender, receiver) = mpsc::sync_channel(1);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -72,7 +107,7 @@ impl Win32Overlay {
         let worker = thread::Builder::new()
             .name("lucas-overlay".into())
             .spawn(move || {
-                let mut native = match Native::new(target, options) {
+                let mut native = match Native::new(target, Box::new(eligibility), options) {
                     Ok(native) => native,
                     Err(error) => {
                         let _ = ready_tx.send(Err(error.clone()));
@@ -207,10 +242,15 @@ struct Native {
     surface: Surface,
     dib: Dib,
     pulse: Option<(Pulse, Instant)>,
+    eligibility: Box<dyn TargetEligibility>,
 }
 
 impl Native {
-    fn new(target: Rect, options: Options) -> Result<Self> {
+    fn new(
+        target: Rect,
+        eligibility: Box<dyn TargetEligibility>,
+        options: Options,
+    ) -> Result<Self> {
         let surface = Surface::for_target(target)?;
         // SAFETY: all objects below are created and destroyed on this thread.
         // Setting thread DPI before creating any window avoids changing a host
@@ -260,6 +300,7 @@ impl Native {
                 surface,
                 dib,
                 pulse: None,
+                eligibility,
             };
             if options.exclude_from_capture
                 && SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE) == 0
@@ -276,6 +317,9 @@ impl Native {
         unsafe {
             let mut message = MSG::default();
             loop {
+                if self.pulse.is_some() && self.eligibility.check().is_err() {
+                    self.hide();
+                }
                 while let Ok(request) = receiver.try_recv() {
                     let shutdown = matches!(request.command, Command::Shutdown);
                     let result = self.apply(request.command);
@@ -302,7 +346,13 @@ impl Native {
                     {
                         if let Err(error) = self.draw() {
                             self.hide();
-                            return Err(error);
+                            if !matches!(
+                                error,
+                                OverlayError::TargetNotForeground
+                                    | OverlayError::ExclusiveFullscreen
+                            ) {
+                                return Err(error);
+                            }
                         }
                     } else {
                         TranslateMessage(&message);
@@ -313,7 +363,7 @@ impl Native {
                 if MsgWaitForMultipleObjectsEx(
                     1,
                     &handle,
-                    INFINITE,
+                    if self.pulse.is_some() { 16 } else { INFINITE },
                     QS_ALLINPUT,
                     MWMO_INPUTAVAILABLE,
                 ) == WAIT_FAILED
@@ -329,6 +379,10 @@ impl Native {
             Command::Show(pulse) => {
                 self.pulse = Some((pulse, Instant::now()));
                 self.draw()?;
+                self.eligibility.check()?;
+                if self.pulse.is_none() {
+                    return Ok(());
+                }
                 // SAFETY: a live window owned by this thread, timer has no callback.
                 unsafe {
                     if SetTimer(self.window, TIMER, 16, None) == 0 {
@@ -367,7 +421,12 @@ impl Native {
                 self.dib = dib;
                 self.draw()
             }
-            Command::Topmost => self.topmost(),
+            Command::Topmost => {
+                if self.pulse.is_some() {
+                    self.eligibility.check()?;
+                }
+                self.topmost()
+            }
         }
     }
 
@@ -404,12 +463,14 @@ impl Native {
         let Some((pulse, started)) = self.pulse else {
             return Ok(());
         };
+        self.eligibility.check()?;
         let elapsed = started.elapsed();
         if elapsed >= Pulse::DURATION {
             self.hide();
             return Ok(());
         }
         let image = render::frame(self.surface, pulse, elapsed)?;
+        self.eligibility.check()?;
         // SAFETY: DIB owns an exactly width*height*4 top-down 32-bit buffer. No
         // GDI operations use it while Rust writes. GdiFlush fences the prior use.
         unsafe {

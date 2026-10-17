@@ -31,6 +31,16 @@ fn commands_are_recorded_in_order_and_shutdown_is_idempotent() {
 }
 
 #[test]
+fn pulse_accepts_core_salience_and_defaults_to_medium() {
+    assert_eq!(Pulse::default().salience, lucas_core::Salience::Medium);
+    let pulse = Pulse {
+        salience: lucas_core::Salience::Soft,
+        ..Pulse::default()
+    };
+    assert_eq!(pulse.ripple_count(), 1);
+}
+
+#[test]
 fn invalid_update_preserves_state_and_log() {
     let original = Rect::new(10.0, 20.0, 210.0, 220.0).unwrap();
     let mut overlay = Recording::new(original).unwrap();

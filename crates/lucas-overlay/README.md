@@ -15,9 +15,11 @@ in the explicitly invoked synthetic-window integration test.
   Coordinates are physical desktop pixels; negative monitor origins work.
 - Calls acknowledge completion. Show restarts a finite 1.2-second animation;
   hide cancels it immediately. The window hides automatically at completion.
-- The application owns eligibility. Show only when the game is foreground and
-  coaching is eligible; call hide when either condition ends. Reassert topmost
-  when a foreground **poll** indicates it is needed. No hooks are needed.
+- The application owns coaching eligibility and hides when coaching ends.
+  Win32 independently checks the target window before presentation and polls it
+  at 16-ms intervals during a pulse. Foreground loss or exclusive fullscreen
+  cancels the pulse; returning to the game does not resume it. No hooks are used.
+  Reassert topmost when an application poll indicates it is needed.
 - On a geometry poll, recompute the map from the current game-client rect and
   settings and call `set_target_rect`. A visible pulse follows without restarting
   its animation; moving a hidden overlay does not show it.
@@ -39,12 +41,17 @@ overlay.shutdown()?;
 ```
 
 On Windows, replace the constructor with
-`win32::Win32Overlay::new(map, win32::Options::default())`.
+`win32::Win32Overlay::new(map, win32::TargetWindow::new(game_hwnd), win32::Options::default())`.
+Keep the target HWND valid for the overlay's lifetime. `TargetEligibility` is a
+small injectable seam for future `lucas-game` detection and synthetic tests;
+its `check` must reject background, minimized, missing, and exclusive targets.
+The native `TargetWindow` implementation uses public window metadata only.
 
 ## Visuals
 
 Default: **amber ripple**, medium salience. `Pulse` carries a style, RGB colour,
-and salience independently of scheduling. Built-in colours are amber
+and salience independently of scheduling. `Salience` is re-exported from
+`lucas-core`; the overlay's explicit default remains Medium. Built-in colours are amber
 `#ffb838`, cyan `#43d6eb`, and white; any RGB value is accepted.
 
 | Salience | Core width (physical px) | Peak opacity multiplier | Ripples |
@@ -84,12 +91,15 @@ message loop for commands without relying on the window-message queue quota;
 when idle the thread sleeps in `MsgWaitForMultipleObjectsEx`.
 
 Windows 10/11 Borderless (recommended) and Windowed are supported. True exclusive
-fullscreen is not. `win32::is_exclusive_fullscreen` combines the shell's
+fullscreen is not. The presentation gate calls `win32::is_exclusive_fullscreen`,
+which combines the shell's
 `QUNS_RUNNING_D3D_FULL_SCREEN` hint with foreground, popup style, and exact
 window/monitor bounds. It is conservative, not definitive: fullscreen
 optimizations can make modes indistinguishable. Query failures return errors,
-not a false promise of support. An embedding UI can advise **Switch League to
-Borderless**. The helper is here because `lucas-game` did not yet implement it;
+not a false promise of support. Show requests return `TargetNotForeground` or
+`ExclusiveFullscreen` when rejected; the latter explains **Switch League to
+Borderless or Windowed** for the embedding UI to display. The helper is here
+because `lucas-game` did not yet implement it;
 future game discovery should reuse it rather than add a second detector.
 
 `Options { exclude_from_capture: true }` opts into
@@ -123,9 +133,13 @@ The harness spawns a separate, known-colour borderless fake game process. It
 asserts window styles/DPI, focus preservation, `WindowFromPoint`, an actual
 `SendInput` click delivered to the fake game at an opaque ring pixel, ring pixels
 via `BitBlt(CAPTUREBLT)`, unchanged map pixels, topmost recovery after the fake
-raises itself, moved/resized map following, auto-hide, shutdown/drop, and opt-in
-affinity. It saves screenshots throughout and on failure; CI uploads them even
-when assertions fail. Input is guarded by a hit-test against the synthetic HWND;
+raises itself, moved/resized map following, auto-hide, foreground-loss cancellation,
+injected exclusive-fullscreen rejection, shutdown/drop, and opt-in affinity.
+Screenshots contain only the synthetic fixture's current rectangle, with screen
+coordinates translated to image-local coordinates. Capture requires the fixture
+to be visible and foreground; cleanup never captures the desktop. CI uploads
+already-saved fixture images even when assertions fail.
+Input is guarded by a hit-test against the synthetic HWND;
 the cursor is restored and the child is closed on exit. Do not run this harness
 while using the desktop for other work. It does not require League or a webcam.
 

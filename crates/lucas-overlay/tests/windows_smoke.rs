@@ -8,13 +8,16 @@ use lucas_geometry::{Alignment, MinimapSettings, minimap_rect};
 use lucas_overlay::{
     Overlay, OverlayError, Pulse, Rect, Salience,
     render::Surface,
-    win32::{Options, Win32Overlay, is_exclusive_fullscreen},
+    win32::{Options, TargetEligibility, TargetWindow, Win32Overlay, is_exclusive_fullscreen},
 };
 use std::{
     path::PathBuf,
     process::{Child, Command},
     ptr::{null, null_mut},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -27,8 +30,25 @@ use windows_sys::Win32::{
 
 const RAISE: u32 = WM_APP + 20;
 const MOVE: u32 = WM_APP + 21;
+const FOCUS: u32 = WM_APP + 22;
 const CLICK_PROPERTY: &str = "LUCAS.smoke.clicks";
 static CLICKS: AtomicUsize = AtomicUsize::new(0);
+static NEXT_GAME: AtomicUsize = AtomicUsize::new(0);
+
+struct TestTarget {
+    window: TargetWindow,
+    exclusive: Arc<AtomicBool>,
+}
+
+impl TargetEligibility for TestTarget {
+    fn check(&self) -> lucas_overlay::Result<()> {
+        self.window.check()?;
+        if self.exclusive.load(Ordering::SeqCst) {
+            return Err(OverlayError::ExclusiveFullscreen);
+        }
+        Ok(())
+    }
+}
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }
@@ -52,6 +72,10 @@ unsafe extern "system" fn game_proc(hwnd: HWND, message: u32, w: WPARAM, l: LPAR
                     0,
                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
                 );
+                0
+            }
+            FOCUS => {
+                SetForegroundWindow(w as HWND);
                 0
             }
             MOVE => {
@@ -138,7 +162,11 @@ struct Game {
 }
 impl Game {
     fn spawn() -> Self {
-        let title = format!("LUCAS fake borderless game {}", std::process::id());
+        let title = format!(
+            "LUCAS fake borderless game {}-{}",
+            std::process::id(),
+            NEXT_GAME.fetch_add(1, Ordering::SeqCst)
+        );
         let artifacts = std::env::var_os("LUCAS_OVERLAY_ARTIFACT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
@@ -190,12 +218,13 @@ impl Game {
         game
     }
 
-    fn snapshot(&self, name: &str) -> tiny_skia::Pixmap {
-        let image = screenshot();
-        image
+    fn snapshot(&self, name: &str) -> Snapshot {
+        let snapshot = screenshot(self.window);
+        snapshot
+            .image
             .save_png(self.artifacts.join(format!("{name}.png")))
             .unwrap();
-        image
+        snapshot
     }
 
     fn map(&self) -> Rect {
@@ -218,10 +247,6 @@ impl Game {
 }
 impl Drop for Game {
     fn drop(&mut self) {
-        // Save diagnostics on assertion failures without masking the original panic.
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.snapshot("final-or-failure");
-        }));
         // SAFETY: only our child window is closed and the saved cursor restored.
         unsafe {
             if !self.window.is_null() {
@@ -313,14 +338,30 @@ fn assert_bounds(window: HWND, target: Rect) {
     );
 }
 
-fn ring_pixel(image: &tiny_skia::Pixmap, target: Rect) -> POINT {
+struct Snapshot {
+    image: tiny_skia::Pixmap,
+    bounds: RECT,
+}
+
+impl Snapshot {
+    fn pixel(&self, x: i32, y: i32) -> Option<tiny_skia::PremultipliedColorU8> {
+        self.image.pixel(
+            u32::try_from(x - self.bounds.left).ok()?,
+            u32::try_from(y - self.bounds.top).ok()?,
+        )
+    }
+}
+
+fn ring_pixel(image: &Snapshot, target: Rect) -> POINT {
     let s = Surface::for_target(target).unwrap();
-    for y in s.top().max(0)..(s.top() + s.height() as i32).min(image.height() as i32) {
-        for x in s.left().max(0)..(s.left() + s.width() as i32).min(image.width() as i32) {
+    for y in s.top().max(image.bounds.top)..(s.top() + s.height() as i32).min(image.bounds.bottom) {
+        for x in
+            s.left().max(image.bounds.left)..(s.left() + s.width() as i32).min(image.bounds.right)
+        {
             if target.contains(x as f64, y as f64) {
                 continue;
             }
-            let p = image.pixel(x as u32, y as u32).unwrap();
+            let p = image.pixel(x, y).unwrap();
             if p.red() as u16 > p.green() as u16 + 20 && p.green() as u16 > p.blue() as u16 + 20 {
                 return POINT { x, y };
             }
@@ -345,7 +386,16 @@ fn windows_overlay_smoke() {
             (32, 40, 48),
             "fake window must be painted before taking the reference"
         );
-        let mut overlay = Win32Overlay::new(target, Options::default()).unwrap();
+        let exclusive = Arc::new(AtomicBool::new(false));
+        let mut overlay = Win32Overlay::new(
+            target,
+            TestTarget {
+                window: TargetWindow::new(game.window),
+                exclusive: Arc::clone(&exclusive),
+            },
+            Options::default(),
+        )
+        .unwrap();
         let hwnd = overlay.window_handle();
         assert_eq!(
             GetForegroundWindow(),
@@ -376,7 +426,7 @@ fn windows_overlay_smoke() {
         assert_eq!(affinity, WDA_NONE);
         assert_bounds(hwnd, target);
         assert!(
-            Surface::for_target(target).unwrap().width() < baseline.width(),
+            Surface::for_target(target).unwrap().width() < baseline.image.width(),
             "overlay must stay minimap-sized"
         );
         assert_eq!(
@@ -409,8 +459,8 @@ fn windows_overlay_smoke() {
             "SendInput click received by fake game",
         );
         // Verify the transparent map is exactly unchanged, not only its centre.
-        for y in target.top().ceil() as u32..target.bottom().floor() as u32 {
-            for x in target.left().ceil() as u32..target.right().floor() as u32 {
+        for y in target.top().ceil() as i32..target.bottom().floor() as i32 {
+            for x in target.left().ceil() as i32..target.right().floor() as i32 {
                 assert_eq!(
                     shown.pixel(x, y),
                     baseline.pixel(x, y),
@@ -432,6 +482,49 @@ fn windows_overlay_smoke() {
         thread::sleep(Duration::from_millis(180));
         ring_pixel(&game.snapshot("04-topmost-reasserted"), target);
 
+        let other = Game::spawn();
+        SendMessageW(other.window, FOCUS, game.window as WPARAM, 0);
+        wait_for(
+            || GetForegroundWindow() == game.window,
+            "focus pulse target",
+        );
+        overlay.show_pulse(pulse).unwrap();
+        assert_ne!(IsWindowVisible(hwnd), 0);
+        let lost_at = Instant::now();
+        SendMessageW(game.window, FOCUS, other.window as WPARAM, 0);
+        wait_for(
+            || GetForegroundWindow() == other.window,
+            "focus other fixture",
+        );
+        wait_for(|| IsWindowVisible(hwnd) == 0, "foreground loss hides pulse");
+        assert!(lost_at.elapsed() < Duration::from_millis(500));
+        assert_eq!(
+            overlay.show_pulse(pulse),
+            Err(OverlayError::TargetNotForeground)
+        );
+        assert_eq!(IsWindowVisible(hwnd), 0);
+        assert_eq!(GetForegroundWindow(), other.window);
+        SendMessageW(other.window, FOCUS, game.window as WPARAM, 0);
+        wait_for(
+            || GetForegroundWindow() == game.window,
+            "restore fake game focus",
+        );
+        drop(other);
+        assert_eq!(IsWindowVisible(hwnd), 0);
+        overlay.show_pulse(pulse).unwrap();
+        assert_ne!(IsWindowVisible(hwnd), 0);
+        let exclusive_at = Instant::now();
+        exclusive.store(true, Ordering::SeqCst);
+        wait_for(|| IsWindowVisible(hwnd) == 0, "exclusive mode hides pulse");
+        assert!(exclusive_at.elapsed() < Duration::from_millis(500));
+        let error = overlay.show_pulse(pulse).unwrap_err();
+        assert_eq!(error, OverlayError::ExclusiveFullscreen);
+        assert!(error.to_string().contains("Borderless"));
+        assert_eq!(IsWindowVisible(hwnd), 0);
+        exclusive.store(false, Ordering::SeqCst);
+        overlay.show_pulse(pulse).unwrap();
+        assert_ne!(IsWindowVisible(hwnd), 0);
+
         SendMessageW(game.window, MOVE, 0, 0);
         let moved = game.map();
         assert_ne!(moved, target);
@@ -440,7 +533,10 @@ fn windows_overlay_smoke() {
         assert_eq!(GetForegroundWindow(), game.window);
         overlay.show_pulse(pulse).unwrap();
         thread::sleep(Duration::from_millis(180));
-        ring_pixel(&game.snapshot("05-moved-resized"), moved);
+        let resized = game.snapshot("05-moved-resized");
+        assert_eq!((resized.image.width(), resized.image.height()), (760, 560));
+        assert_eq!((resized.bounds.left, resized.bounds.top), (70, 40));
+        ring_pixel(&resized, moved);
         wait_for(|| IsWindowVisible(hwnd) == 0, "finite pulse hides itself");
         game.snapshot("06-completed");
         overlay.reassert_topmost().unwrap();
@@ -458,6 +554,7 @@ fn windows_overlay_smoke() {
         // Exercise opt-in affinity separately; it is OFF for screenshot assertions.
         let mut excluded = Win32Overlay::new(
             moved,
+            TargetWindow::new(game.window),
             Options {
                 exclude_from_capture: true,
             },
@@ -470,7 +567,9 @@ fn windows_overlay_smoke() {
         assert_eq!(affinity, WDA_EXCLUDEFROMCAPTURE);
         excluded.shutdown().unwrap();
         let dropped = {
-            let temporary = Win32Overlay::new(moved, Options::default()).unwrap();
+            let temporary =
+                Win32Overlay::new(moved, TargetWindow::new(game.window), Options::default())
+                    .unwrap();
             temporary.window_handle()
         };
         assert_eq!(
@@ -508,12 +607,16 @@ impl Drop for Capture {
         }
     }
 }
-fn screenshot() -> tiny_skia::Pixmap {
-    // SAFETY: owned DCs and bounded DIB buffer; captures the synthetic desktop
-    // fixture only. CAPTUREBLT deliberately includes layered-window pixels.
+fn screenshot(window: HWND) -> Snapshot {
     unsafe {
-        let width = GetSystemMetrics(SM_CXSCREEN);
-        let height = GetSystemMetrics(SM_CYSCREEN);
+        assert!(!window.is_null());
+        assert_eq!(GetForegroundWindow(), window);
+        assert_ne!(IsWindowVisible(window), 0);
+        assert_eq!(IsIconic(window), 0);
+        let mut bounds = RECT::default();
+        assert_ne!(GetWindowRect(window, &mut bounds), 0);
+        let width = bounds.right - bounds.left;
+        let height = bounds.bottom - bounds.top;
         assert!(width > 0 && height > 0);
         let mut capture = Capture {
             screen: GetDC(null_mut()),
@@ -557,8 +660,8 @@ fn screenshot() -> tiny_skia::Pixmap {
                 width,
                 height,
                 capture.screen,
-                0,
-                0,
+                bounds.left,
+                bounds.top,
                 SRCCOPY | CAPTUREBLT
             ),
             0
@@ -573,6 +676,6 @@ fn screenshot() -> tiny_skia::Pixmap {
         {
             rgba.copy_from_slice(&[bgra[2], bgra[1], bgra[0], 255]);
         }
-        image
+        Snapshot { image, bounds }
     }
 }

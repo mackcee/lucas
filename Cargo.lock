@@ -272,6 +272,7 @@ dependencies = [
 name = "lucas-overlay"
 version = "0.1.0"
 dependencies = [
+ "lucas-core",
  "lucas-geometry",
  "tiny-skia",
  "windows-sys",

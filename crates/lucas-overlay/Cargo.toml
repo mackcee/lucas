@@ -9,6 +9,7 @@ description = "Click-through Win32 minimap overlay, pure pulse renderer, and rec
 publish = false
 
 [dependencies]
+lucas-core = { version = "0.1.0", path = "../lucas-core" }
 lucas-geometry = { version = "0.1.0", path = "../lucas-geometry" }
 tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 
