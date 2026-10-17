@@ -27,6 +27,12 @@ allow = [
     "CDLA-Permissive-2.0",
 ]
 
+# egui's bundled fonts: redistribution notices are retained in
+# crates/lucas-app/licenses/. Keep this scoped to the font package.
+[[licenses.exceptions]]
+name = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

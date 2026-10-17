@@ -160,6 +160,50 @@ fn real_game_state_loading_death_respawn_and_end_feed_the_timer() {
 }
 
 #[test]
+fn shared_deletion_resets_timer_alignment_and_preserves_unrelated_files() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = lucas_store::Store::open_in(folder.path()).unwrap();
+    let key = Key::new(client(), MinimapSettings::default());
+    let alignment = Alignment {
+        offset_x_px: -4.0,
+        offset_y_px: -6.0,
+        scale_multiplier: 1.1,
+    };
+    let mut alignments = AlignmentStore::load(folder.path()).unwrap();
+    alignments.set(key, alignment).unwrap();
+    alignments.save(folder.path()).unwrap();
+    drop(alignments);
+    assert_eq!(
+        AlignmentStore::load(folder.path()).unwrap().get(key),
+        alignment
+    );
+    fs::copy(
+        folder.path().join("alignment.toml"),
+        folder.path().join("alignment.toml.tmp"),
+    )
+    .unwrap();
+    for name in ["unrelated.txt", "alignment.toml.backup"] {
+        fs::write(folder.path().join(name), "keep").unwrap();
+    }
+
+    store.delete_all_data().unwrap();
+
+    assert!(!folder.path().join("alignment.toml").exists());
+    assert!(!folder.path().join("alignment.toml.tmp").exists());
+    assert_eq!(
+        AlignmentStore::load(folder.path()).unwrap(),
+        AlignmentStore::default()
+    );
+    assert_eq!(fs::read_dir(folder.path()).unwrap().count(), 2);
+    for name in ["unrelated.txt", "alignment.toml.backup"] {
+        assert_eq!(
+            fs::read_to_string(folder.path().join(name)).unwrap(),
+            "keep"
+        );
+    }
+}
+
+#[test]
 fn alignment_round_trip_replace_and_exact_profile_keying() {
     let folder = tempfile::tempdir().unwrap();
     let mut store = AlignmentStore::load(folder.path()).unwrap();
