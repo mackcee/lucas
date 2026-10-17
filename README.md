@@ -17,14 +17,16 @@ Early development: **M1.1 implements the pure training core**. See
 and metrics. **M2.1 adds the standalone `lucas-geometry` library**; see its
 [geometry and settings reference](crates/lucas-geometry/README.md). **M2.2 adds the
 standalone `lucas-overlay` library**; see its [overlay and Windows integration
-reference](crates/lucas-overlay/README.md). The `lucas` binary still only prints its
-version; these libraries are not wired into the app yet. Gaze tracking,
-calibration, game integration, and storage remain unimplemented. The binary
-opens no camera and makes no network requests.
+reference](crates/lucas-overlay/README.md). **M4.1 adds the
+[`lucas-gaze`](crates/lucas-gaze/README.md) library** with Windows webcam capture,
+offline face/iris landmarks and filtered gaze features. These libraries are not yet
+integrated into the `lucas` binary, which still only prints its version.
+Calibration, game integration, storage and application wiring are not implemented
+yet. Running the current binary does not open a camera or make network requests.
 
 The application targets **Windows only**. League must run in **Borderless or
-Windowed mode**, not exclusive fullscreen. The workspace can also be built and
-checked on Linux. Builds will initially be unsigned.
+Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
+can also be built and checked on Linux. Builds will initially be unsigned.
 
 ## Privacy
 
@@ -56,7 +58,7 @@ cargo install cargo-deny --locked
 cargo deny check
 ```
 
-The first build may download the pinned toolchain. `cargo deny` checks dependency
+The first build may download the pinned toolchain and the ONNX Runtime library. `cargo deny` checks dependency
 licenses, sources, bans, and RustSec advisories; its initial check requires network
 access to fetch the advisory database.
 
@@ -71,12 +73,13 @@ access to fetch the advisory database.
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
 | `lucas-app` | `lucas` binary, future tray application and UI |
-| `xtask` | Development tooling scaffold |
+| `xtask` | Synthetic-player simulator, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
-[above](#status). No model files are included yet. The gaze pipeline will use
-MediaPipe models through ONNX Runtime behind a `GazeSource` trait; see
-[`models/README.md`](models/README.md).
+[above](#status). The gaze library uses hash-pinned MediaPipe models through ONNX
+Runtime behind a `GazeSource` trait, with an optional tract fallback; see
+[`models/README.md`](models/README.md) for attribution and development-only
+conversion commands. Models are never downloaded at application runtime.
 
 ## License
 
@@ -85,4 +88,4 @@ Licensed under either of
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), or
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-at your option. See [NOTICE](NOTICE) for the model attribution placeholder.
+at your option. Third-party MediaPipe models remain Apache-2.0; see [NOTICE](NOTICE).

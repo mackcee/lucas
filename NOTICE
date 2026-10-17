@@ -1,11 +1,29 @@
 LUCAS — League Universal Coach AI System
 Copyright (c) 2026 Charlie Mack
 
-MediaPipe model attribution placeholder
+MediaPipe models and reference geometry
 --------------------------------------
-No third-party model files are distributed in this workspace yet.
-Future MediaPipe models are expected to be licensed under Apache License 2.0.
-When they are added, preserve their upstream notices and replace this placeholder
-with attribution identifying the exact files, upstream sources, and copyright
-holders. This notice does not relicense third-party models under LUCAS's MIT
-license option.
+Copyright 2019-2025 The MediaPipe Authors / Google LLC
+Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE).
+Upstream: https://github.com/google-ai-edge/mediapipe
+
+This distribution contains ONNX conversions of Google's face_detector.tflite
+(BlazeFace short-range) and face_landmarks_detector.tflite (Face Landmarker v2,
+478 points), from the version 1 float16 face_landmarker.task bundle:
+https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+
+The conversions were produced with tf2onnx 1.17.0, opset 17. Format and tensor
+representation were changed; no retraining was performed. Exact source and
+converted SHA-256s, conversion instructions, and model scope are in models/.
+
+The landmark decoder follows the MediaPipe v0.10.32 face detector and landmark
+graphs (Copyright 2023-2025 The MediaPipe Authors). The seven canonical-face
+vertices in crates/lucas-gaze/src/features.rs are adapted from MediaPipe's
+canonical_face_model.obj (Copyright 2020 The MediaPipe Authors).
+
+The test-only portrait.jpg is MediaPipe's Apache-2.0 test asset from
+https://storage.googleapis.com/mediapipe-assets/portrait.jpg . It is not a user
+webcam recording. Its provenance and SHA-256 are in the fixture README.
+
+These third-party materials remain Apache-2.0 and are not relicensed under
+LUCAS's MIT option. No upstream NOTICE file is present in the model archive.
