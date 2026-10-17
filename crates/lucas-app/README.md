@@ -66,7 +66,9 @@ M4.2 provides the Windows `lucas` debug window and an opt-in fullscreen glance
 recorder. The library contains portable script, trace-format and replay-summary
 logic; it does not start a camera or touch disk merely by being linked. See
 [Windows testing](../../docs/testing-on-windows.md) for the tester checklist.
-Calibration, classification, tray controls and the live pulse loop are not here.
+Calibration and gaze classification are not implemented yet. The separate timer
+tray starts with no arguments or `--timer`; use `lucas --seconds 600` for gaze
+diagnostics. Timer pulses are not driven by gaze.
 
 ## Data boundary
 

@@ -2,9 +2,9 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
-mod console;
-#[cfg(windows)]
 mod capture;
+#[cfg(windows)]
+mod console;
 #[cfg(windows)]
 mod debug_ui;
 

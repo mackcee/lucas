@@ -84,10 +84,10 @@ but **does not pass** the alive/dead/loading portion of G1.
 ## G2 — Windows webcam test
 
 This session uses the gaze debug window and opt-in glance recorder, not timer
-mode or gaze-driven coaching. Use Windows 10/11 x64 and an AVX2-capable CPU. No Rust, Python,
-model downloads or developer tools are needed on the test PC.
+mode or gaze-driven coaching. Use Windows 10/11 x64 and an AVX2-capable CPU.
+No Rust, Python, model downloads or developer tools are needed on the test PC.
 
-## Download and run
+### Download and run
 
 1. Open [GitHub Actions](https://github.com/mackcee/lucas/actions/workflows/ci.yml),
    choose the successful run for the intended commit on **main** (or the test PR),
@@ -97,8 +97,9 @@ model downloads or developer tools are needed on the test PC.
    Keep `lucas.exe`, **all DLLs**, `models/` and `licenses/` together. Do not run
    the executable from inside a ZIP.
 3. From a terminal in the extracted folder, run `.\lucas.exe --seconds 600` to
-   open gaze diagnostics (double-clicking starts timer mode). Builds are unsigned: after confirming you downloaded
-   the intended repository/commit, SmartScreen may require **More info → Run anyway**.
+   open gaze diagnostics (double-clicking starts timer mode). Builds are unsigned:
+   after confirming you downloaded the intended repository/commit, SmartScreen
+   may require **More info → Run anyway**.
 4. Select your Logitech C270 and click **Connect camera**. Close Discord/OBS or
    other apps using the camera if it cannot open. Allow desktop camera access in
    Windows Settings → Privacy (or Privacy & security) → Camera.
@@ -110,7 +111,7 @@ uses camera-space iris ratios: it is **not calibrated**, not a screen position,
 and not a minimap detection. No camera preview is shown or stored. Low quality,
 unknown eyes, or low fps are reasons to adjust lighting and placement first.
 
-## Record the test (about 10 minutes)
+### Record the test (about 10 minutes)
 
 - Sit at your normal playing distance. Leave League closed for this test; it
   displays its own targets on the **Windows main monitor**. Disable notifications
@@ -148,7 +149,7 @@ false detection per minute of not looking), try the C270 near the minimap corner
 and repeat, identifying the new position in the note. Detection-rate evaluation
 and fitting are M5.1; this build does not claim that the criterion has passed.
 
-## Troubleshooting / development
+### Troubleshooting / development
 
 - Missing model or hash error: re-extract the complete matching bundle. The app
   never downloads replacement models. Do not change `SHA256SUMS` to bypass it.
