@@ -239,8 +239,9 @@ impl Store {
     }
 
     /// Consumes the owner and closes SQLite BEFORE removing files (Windows-safe).
-    /// Caller must stop capture/trace/report writers and release other store
-    /// handles first. Does not follow directory symlinks when removing traces.
+    /// First satisfy the crate README's Privacy controls prerequisites: quiesce
+    /// writers and cached state, and release other store handles.
+    /// Does not follow directory symlinks when removing traces.
     /// Preserves unrelated files in an overridden directory. Errors are surfaced;
     /// callers may reopen the same directory to retry after releasing other handles.
     pub fn delete_all_data(self) -> Result<()> {

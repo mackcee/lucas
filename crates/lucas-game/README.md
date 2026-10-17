@@ -29,10 +29,10 @@ locator are Windows-specific.
 - `StateUpdate::deaths` contains exact EventTime values and event IDs, once per
   session, including catch-up events when attaching mid-game. Active identity must
   resolve to a unique player ID; champion names are accepted only for death-event
-  attribution, and only when no other player's ID or champion matches. The future
-  core integration must compare deaths against gaze history for the >=8 s
-  blind-death rule (unknown if history or gaze quality is insufficient). No blind
-  classification is guessed here.
+  attribution, and only when no other player's ID or champion matches. Blind-death
+  classification belongs to the consumer, not this library; see the
+  [core metric definitions](../lucas-core/README.md#metrics-and-persistence) and
+  app's [runtime mapping contract](../lucas-app/src/runtime/README.md#end-of-game-storage).
 - `StateUpdate::events` includes newly seen objective/turret events without
   changing coaching behavior. The consumer should reset its gap clock on
   `respawned`, including when a confirmed death is followed by living gameplay
@@ -51,7 +51,7 @@ game.cfg for each root. Pass `SettingsFile::read()` text to lucas-geometry's exi
 `parse_persisted_settings` or `parse_game_cfg` API according to `SettingsFormat`.
 See the [settings parsing contract](../lucas-geometry/README.md#reading-settings)
 for `SettingsPatch`, per-field fallback, defaults, and parse-error handling.
-This crate only discovers and reads files, not HUD values. The timer app connects
+This crate only discovers and reads files, not HUD values. The tray app connects
 discovery to parsing in [`read_hud`](../lucas-app/src/timer/settings.rs); see the
 [Windows checklist](../../docs/testing-on-windows.md#start-and-gate-checks) for
 runtime settings discovery and troubleshooting. Diagnostics also connect discovery

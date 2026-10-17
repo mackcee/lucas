@@ -17,8 +17,10 @@ sound drive gaze coaching; no level selector or automatic promotion is added.
   the tray's weights/camera fingerprint before validating. Changes on disk during
   the check cannot silently substitute a different coaching snapshot.
 - A failed/cancelled quick check latches **Calibration needed / recalibrate**.
-  Old weights stay on disk but cannot enable coaching. Complete a new full fit,
-  then the game's quick check. There is no implicit recalibration.
+  Starting full recalibration also revokes readiness immediately: cancelling or
+  failing cannot resume coaching with old weights. Old weights stay on disk but
+  cannot enable coaching. Complete a new full fit, then the game's quick check.
+  There is no implicit recalibration.
 - Screen origin, resolution, DPI and the aligned minimap rectangle must match
   the saved fit. Use Borderless on the calibration display (currently the main
   monitor). Changed alignment/scale/flip needs matching calibration again.
@@ -55,9 +57,12 @@ a wedged camera driver remains a native hardware-test limitation.
 
 API loss fails closed immediately. To avoid a focus-stealing false post-game
 card on transient connection loss, a session finishes on authoritative GameEnd
-or API loss **plus disappearance of the game window**. Reconnection keeps the
-same session/death deduplication. The explicit **Use Live Client gate** tray
-switch selects window-only fallback; there is no silent permissive fallback.
+or API loss **plus disappearance of the game window**. Reconnection before
+finalization keeps the same session/death deduplication. If the window disappears
+and the session finishes, returning to the same active match starts a new session
+and requires another quick check, while retaining death deduplication.
+The explicit **Use Live Client gate** tray switch selects window-only fallback;
+there is no silent permissive fallback.
 Window-only cannot know loading, death, map/mode or game-clock pauses: pause it
 manually. Its summaries use session elapsed time and mark death data unavailable.
 
@@ -74,8 +79,8 @@ per-frame runtime features. Timer fallback pulses also count as assistance.
 
 At game end the summary/events are saved, then a separate post-game process opens
 the exact saved game. Gate-mode changes defer presentation until game end.
-The card's deletion control requests tray shutdown; the tray releases workers,
-children and cached state before deleting data. Restart LUCAS to begin fresh.
+For deletion and restart behavior, see the
+[card integration contract](../../README.md#integration-at-game-end).
 Cards are suppressed/closed when another game starts. Calibration and post-game
 children close on tray exit.
 

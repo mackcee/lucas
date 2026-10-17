@@ -136,6 +136,7 @@ fn replay_checks_pulses_unknown_spans_and_stored_blind_seen_unknown_deaths() {
     let mut pulses = Vec::new();
     let mut unknown_gap = None;
     let mut checks = Vec::new();
+    let mut timeline = Vec::new();
     while let Some(s) = source.next_sample().unwrap() {
         let ms = s.timestamp.as_millis() as u64;
         if (ms - 1).is_multiple_of(1000) {
@@ -170,6 +171,15 @@ fn replay_checks_pulses_unknown_spans_and_stored_blind_seen_unknown_deaths() {
                 1_000_000 + ms,
             )
             .unwrap();
+        if (ms - 1).is_multiple_of(1000) || tick.pulse.is_some() {
+            timeline.push(serde_json::json!({
+                "elapsed_ms": ms,
+                "status": format!("{:?}", tick.status),
+                "eligible_gap_ms": tick.gap_ms,
+                "overlay_hidden": tick.hide,
+                "pulse": tick.pulse.is_some(),
+            }));
+        }
         if tick.pulse.is_some() {
             pulses.push(ms);
         }
@@ -242,6 +252,42 @@ fn replay_checks_pulses_unknown_spans_and_stored_blind_seen_unknown_deaths() {
         Some(summary)
     );
     assert!(!serde_json::to_string(summary).unwrap().contains("features"));
+
+    // Opt-in evidence from the executed runtime, not a hand-authored demo.
+    // The native --show-postgame CLI can open this exact persisted game.
+    if let Some(path) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
+        let directory = std::path::Path::new(&path);
+        std::fs::create_dir_all(directory).unwrap();
+        let fixture = directory.join("runtime-replay-store");
+        assert!(!fixture.exists(), "refusing to overwrite evidence");
+        let mut store = Store::open_in(&fixture).unwrap();
+        store.save_summary(summary).unwrap();
+        drop(store);
+        let persisted = Store::open_in(&fixture)
+            .unwrap()
+            .summary(&summary.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&persisted, summary);
+        std::fs::write(
+            directory.join("runtime-replay-summary.json"),
+            serde_json::to_vec_pretty(&persisted).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            directory.join("runtime-replay-timeline.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "synthetic_gaze_and_api_not_native_webcam_acceptance": true,
+                "scenario": "Minimap dwells at 1, 20 and 55 s; deaths at 14, 22 and 40 s; no face at 30–35 s; off-screen at 35–41 s; foreground lost at 45–47 s; GameEnd at 61 s",
+                "pulse_elapsed_ms": pulses,
+                "camera_wanted_after_game_end": runtime.camera_wanted(true, true, false),
+                "postgame_ready": runtime.postgame_ready(),
+                "ticks": timeline,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
 }
 
 #[test]

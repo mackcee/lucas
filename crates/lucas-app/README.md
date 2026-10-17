@@ -27,10 +27,16 @@ runtime hosts the card in a subprocess and owns game-end routing, in-game
 suppression and pause-aware event clock mapping. Follow the storage reference's
 [deletion prerequisites](../lucas-store/README.md#privacy-controls) first:
 ownership transfers into the card so **Delete all data** can close SQLite before
-deleting files. Deletion requires a second,
-explicit confirmation and clears the in-memory card on success. If deleting
-fails, keep the card open, close other LUCAS windows, and choose **Delete all data**
-again. The card can retry even if the database or summary has already been removed.
+deleting files. Deletion requires a second, explicit confirmation.
+
+- In the standalone viewer or an embedded card, success clears the in-memory card.
+  If deleting fails, keep the card open, close other LUCAS windows, and choose
+  **Delete all data** again. The card can retry even if the database or summary
+  has already been removed.
+- In the tray-opened card, confirmation closes the card and requests tray shutdown.
+  The tray releases its workers, children and cached state before deleting files.
+  Close independently launched diagnostics/viewers first as required by the
+  storage contract above. Restart LUCAS to begin with fresh settings and calibration.
 
 ## Reading the card
 
@@ -181,12 +187,14 @@ calibration. Escape cancels without replacing previous weights.
 Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
 **in front** of the player. Luma is computed in RAM; no image is stored. A result
 shows mean angular error, sensitivity/FPR and pass/fail. Only passing fits save
-weights/geometry/validation aggregates through `lucas-store`; failures retain the
-previous model. Full calibration samples never create a numeric trace file.
+weights/geometry/validation aggregates through `lucas-store` and update the saved
+camera selection; failures retain the previous model. Full calibration samples
+never create a numeric trace file.
 The separate glance recorder still requires explicit opt-in for each recording.
 
 **Quick check** uses one minimap and one centre target in four seconds. It neither
-refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
+refits nor saves and must use the saved calibrated camera. Repeat full calibration
+after a failed quick check. For integrations:
 
 1. Construct `CalibrationScript::new` with the current settings and loaded
    `AlignmentStore` as above. Pass its `screen().minimap` to
@@ -198,8 +206,8 @@ refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
    `validation.passes(model.target_false_positive_rate())` before enabling gaze.
 4. Feed the camera stream to `lucas_gaze::decision::CalibratedDetector`.
 
-`runtime` now owns game-start routing, unknown handling in play and disabling
-gaze when revalidation fails, using these unchanged calibration seams.
+The [runtime guide](src/runtime/README.md#before-play) owns game-start routing,
+calibration snapshot matching and failure handling for the tray integration.
 
 ## Windows bundle
 
