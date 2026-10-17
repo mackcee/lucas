@@ -61,12 +61,10 @@ fn shared_selector_clicks_each_ramp_fade_and_off_choice_and_persists_it() {
         let current = level_label(lucas_core::TRAINING_LEVELS[settings.level_index]);
         click(&context, &mut settings.level_index, &current);
         let opened = render(&context, &mut settings.level_index, vec![]);
-        assert!(
-            !opened.shapes.iter().any(|shape| matches!(
-                &shape.shape,
-                egui::epaint::Shape::Text(text) if text.galley.text() == "Baseline (no pulses)"
-            ))
-        );
+        assert!(!opened.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::epaint::Shape::Text(text) if text.galley.text() == "Baseline (no pulses)"
+        )));
         let label = level_label(level);
         click(&context, &mut settings.level_index, &label);
         assert_eq!(settings.level_index, expected, "clicked {label}");
