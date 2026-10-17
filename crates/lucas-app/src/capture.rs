@@ -305,12 +305,18 @@ mod tests {
             script_seconds: 61,
             minimap: MinimapSelection::resolve(&lucas_game::SettingsLocator::default()).unwrap(),
         };
-        assert!(state.start(directory.path(), header.clone(), Instant::now()).is_err());
+        assert!(
+            state
+                .start(directory.path(), header.clone(), Instant::now())
+                .is_err()
+        );
         assert!(state.error.is_some());
         assert!(!state.is_recording());
         header.started_unix_ms = 1;
         header.script_seconds = 60;
-        state.start(directory.path(), header, Instant::now()).unwrap();
+        state
+            .start(directory.path(), header, Instant::now())
+            .unwrap();
         assert!(state.error.is_none());
         assert!(state.is_recording());
         state.finish(EndReason::Completed);

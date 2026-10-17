@@ -149,7 +149,10 @@ fn scripted_session_replays_only_valid_focused_holds() {
     let summary = lucas_app::trace::summarize(&trace).unwrap();
     assert_eq!(summary.valid_frames, 16_200);
     assert_eq!(summary.distributions[&TargetKind::Minimap][0].count, 5_400);
-    assert_eq!(summary.distributions[&TargetKind::Elsewhere][0].count, 5_373);
+    assert_eq!(
+        summary.distributions[&TargetKind::Elsewhere][0].count,
+        5_373
+    );
     let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
         .arg("replay")
         .arg(&path)
@@ -177,7 +180,8 @@ fn scripted_session_replays_only_valid_focused_holds() {
     let end_start = bytes[..bytes.len() - 1]
         .iter()
         .rposition(|b| *b == b'\n')
-        .unwrap() + 1;
+        .unwrap()
+        + 1;
     std::fs::write(&path, &bytes[..end_start]).unwrap();
     let rejected = Command::new(env!("CARGO_BIN_EXE_xtask"))
         .arg("replay")
