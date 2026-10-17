@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-checks:
+    # Keep these job names stable: they are intended to be required PR checks.
+    name: Linux / format, lint, tests, dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install repository-pinned Rust toolchain and components
+        # rustup reads rust-toolchain.toml, including rustfmt and clippy.
+        run: rustup show
+      - name: Cache Cargo registry and build output
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: linux-checks
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Cache ONNX Runtime downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ort.pyke.io
+          key: ort-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ort-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Reserve model-file cache
+        # Empty until the gaze/model chunk adds assets; never cache source or notices.
+        # Model manifests/conversion tooling must live in models/ or xtask/ so edits
+        # invalidate this key. Do not fall back to an older set of model files.
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            models/**/*.onnx
+            models/**/*.tflite
+            models/**/*.task
+          key: models-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('models/**', 'xtask/**', 'Cargo.lock') }}
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test workspace
+        run: cargo test --workspace
+      - name: Check dependency advisories, licenses, bans, and sources
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 (cargo-deny 0.20.2)
+        with:
+          command: check
+
+  windows-msvc:
+    name: Windows / MSVC build and tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # Apply MSVC to both build and test, regardless of the runner's default.
+      CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install repository-pinned Rust MSVC toolchain and components
+        run: |
+          rustup set default-host x86_64-pc-windows-msvc
+          rustup show
+      - name: Cache Cargo registry and build output
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: windows-msvc
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Cache ONNX Runtime downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ort.pyke.io
+          key: ort-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ort-v1-${{ runner.os }}-${{ runner.arch }}-
+      - name: Reserve model-file cache
+        # Same reserved assets/key inputs as Linux; model acquisition comes later.
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            models/**/*.onnx
+            models/**/*.tflite
+            models/**/*.task
+          key: models-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('models/**', 'xtask/**', 'Cargo.lock') }}
+      - name: Build workspace with MSVC
+        run: cargo build --workspace --all-targets
+      - name: Test workspace with MSVC
+        run: cargo test --workspace
