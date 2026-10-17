@@ -5,5 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Development tooling scaffold."
+description = "LUCAS development tools and synthetic-player simulator."
 publish = false
+
+[dependencies]
+lucas-core = { path = "../crates/lucas-core" }
