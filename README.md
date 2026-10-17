@@ -21,10 +21,12 @@ reference](crates/lucas-overlay/README.md). **M3.1 adds the `lucas-game` library
 for local game-state integration; see its
 [integration contract](crates/lucas-game/README.md). **M4.1 adds the
 [`lucas-gaze`](crates/lucas-gaze/README.md) library** with Windows webcam capture,
-offline face/iris landmarks and filtered gaze features. These libraries are not yet
-integrated into the `lucas` binary, which still only prints its version.
-Calibration, storage and application wiring are not implemented yet. Running the
-current binary does not open a camera or make network requests.
+offline face/iris landmarks and filtered gaze features. **M3.2 wires the Windows
+`lucas` binary into a tray timer app**: a ten-second amber reminder, Live Client
+alive/game gating (with explicit window-only fallback), minimap alignment and
+numeric geometry reports. See the [G1 Windows checklist](docs/testing-on-windows.md#g1--timer-mode-and-minimap-alignment-about-15-minutes).
+Timer mode does not open a camera. Gaze-driven coaching, calibration and per-game
+storage are not wired into it yet.
 
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
@@ -38,9 +40,11 @@ network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
 Only settings, calibration, and per-game summaries (including event timestamps)
-will be stored locally. Raw webcam frames will not be stored. The current `lucas`
-binary does not collect or persist any data. Developer build and dependency-check
-tools may access package registries and advisory databases.
+will be stored locally. Raw webcam frames will not be stored. Timer mode currently
+persists only alignment profiles and user-requested numeric geometry reports in
+`%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only mode
+disables polling (an already-running request may finish). Developer build and
+dependency-check tools may access package registries and advisory databases.
 
 ## Build and check
 
@@ -50,7 +54,9 @@ The toolchain and required components are pinned in
 
 ```sh
 cargo build --workspace
-cargo run --bin lucas
+cargo run --bin lucas -- --version
+# Windows: start timer mode in the notification area
+cargo run --bin lucas -- --timer
 
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -74,7 +80,7 @@ access to fetch the advisory database.
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
-| `lucas-app` | `lucas` binary, future tray application and UI |
+| `lucas-app` | `lucas` binary, Windows timer tray, alignment and numeric reports |
 | `xtask` | Synthetic-player simulator, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
