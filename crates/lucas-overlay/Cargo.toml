@@ -1,0 +1,9 @@
+[package]
+name = "lucas-overlay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Overlay trait, future Win32 layered implementation, and recording implementation."
+publish = false

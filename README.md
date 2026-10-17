@@ -1,2 +1,86 @@
-# lol-map-awareness-trainer
-Webcam eye-tracking overlay that pulses the League of Legends minimap when you haven't checked it, then fades the training wheels as your map awareness grows
+# LUCAS
+
+**League Universal Coach AI System** is an open source map-awareness trainer for
+League of Legends. It aims to help you build the habit of checking the minimap,
+then get out of the way as that habit becomes natural.
+
+The planned flow is simple: webcam gaze tracking estimates whether you glanced at
+the minimap. After a gap without a glance, an amber ripple pulses around the map;
+sound will be optional. The standard training progression shortens the gap from
+10 to 8 to 6 to 5 seconds, then fades the help as you improve. The game's local
+Live Client Data API will gate pulses to gameplay.
+
+## Status
+
+Early development: **M0.1 is a workspace skeleton only**. The `lucas` binary prints
+its version; gaze tracking, calibration, overlays, storage, and training are not
+implemented yet. No camera is opened and no network requests are made by these
+stubs.
+
+The application targets **Windows only**. League must run in **Borderless or
+Windowed mode**, not exclusive fullscreen. The dependency-free scaffold can also
+be built and checked on Linux. Builds will initially be unsigned.
+
+## Privacy
+
+The planned application has a local-only privacy contract: webcam frames never
+leave RAM and are never written to disk. Nothing is sent off the machine. The only
+network connection during app use is to the game's own local API at
+`127.0.0.1:2999`.
+
+Only settings, calibration, and per-game summaries (including event timestamps)
+will be stored locally. Raw webcam frames will not be stored. The current scaffold
+does not collect or persist any data. Developer build and dependency-check tools
+may access package registries and advisory databases.
+
+## Build and check
+
+Install [Rust via rustup](https://rustup.rs/), then run from the repository root.
+`rust-toolchain.toml` pins stable Rust 1.97.1 with rustfmt and Clippy.
+
+```sh
+cargo build --workspace
+cargo run --bin lucas
+
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+
+cargo install cargo-deny --locked
+cargo deny check
+```
+
+The first build may download the pinned toolchain. `cargo deny` checks dependency
+licenses, sources, bans, and RustSec advisories; its initial check requires network
+access to fetch the advisory database.
+
+### Workspace
+
+| Crate | Responsibility |
+| --- | --- |
+| `lucas-core` | Pure glance detector, gap clock, pulse policy, levels, metrics, session types |
+| `lucas-geometry` | Pure minimap rectangle calculation and gaze zone inflation |
+| `lucas-gaze` | Camera, Landmarker, and GazeSource interfaces; capture and calibration |
+| `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
+| `lucas-overlay` | Overlay interface, future Win32 layered overlay, recording implementation |
+| `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
+| `lucas-app` | `lucas` binary, future tray application and UI |
+| `xtask` | Development commands for simulation, replay, and model conversion |
+
+These are responsibility boundaries, not implemented features. No third-party
+Rust dependencies or model files are included yet. The gaze pipeline will use
+MediaPipe models through ONNX Runtime behind a `GazeSource` trait; see
+[`models/README.md`](models/README.md).
+
+Run `cargo xtask --help` for the development command scaffold. `sim`, `replay`, and
+`model-conversion` currently report that they are unimplemented and exit with a
+nonzero status.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), or
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. See [NOTICE](NOTICE) for the model attribution placeholder.

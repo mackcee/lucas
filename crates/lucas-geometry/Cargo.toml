@@ -1,0 +1,9 @@
+[package]
+name = "lucas-geometry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure minimap geometry from window client rect, MinimapScale, flip, and user alignment, plus gaze zone inflation."
+publish = false
