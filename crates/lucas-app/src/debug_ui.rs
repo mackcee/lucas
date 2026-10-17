@@ -162,8 +162,9 @@ impl DebugApp {
                     "No recent camera frames. Reconnect the camera before recording.".into(),
                 );
             }
-            let minimap =
-                MinimapSelection::resolve(&lucas_game::SettingsLocator::windows_defaults(None))?;
+            let minimap = MinimapSelection::resolve(&lucas_game::SettingsLocator::windows_defaults(
+                std::env::var_os("LUCAS_LEAGUE_ROOT").map(PathBuf::from),
+            ))?;
             let script = Script::new(self.seconds, self.monitor.resolution, minimap.settings())
                 .map_err(str::to_owned)?;
             let started = Instant::now();
