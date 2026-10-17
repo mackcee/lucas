@@ -1,0 +1,9 @@
+[package]
+name = "lucas-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure glance detection, gap clock, pulse policy, training levels, metrics, and session types."
+publish = false

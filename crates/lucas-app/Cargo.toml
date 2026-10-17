@@ -1,0 +1,13 @@
+[package]
+name = "lucas-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tray application and UI entry point."
+publish = false
+
+[[bin]]
+name = "lucas"
+path = "src/main.rs"

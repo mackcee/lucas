@@ -1,0 +1,9 @@
+[package]
+name = "lucas-gaze"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Camera, Landmarker, and GazeSource traits, capture, landmarks, features, and calibration."
+publish = false

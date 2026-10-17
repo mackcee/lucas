@@ -1,0 +1,9 @@
+[package]
+name = "lucas-game"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Live Client Data API client, game state machine, League settings reader, and foreground/fullscreen detection."
+publish = false
