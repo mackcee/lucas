@@ -281,7 +281,8 @@ impl GameState {
     /// Map a gaze timestamp to the recent game timeline (up to 120 successful
     /// polls). Interpolate only within a <=3 s poll interval. Beyond the latest
     /// sample, clamp to its game time for <1 s; never extrapolate through pauses.
-    /// Returns None across outages, old history, or stale/future timestamps.
+    /// Returns None across outages, before retained history, or at least 1 s
+    /// beyond the latest sample.
     /// Typical uncertainty is one poll (~1 s). Buffer checks until the next poll
     /// if interpolation rather than this conservative latest-time clamp is needed.
     pub fn game_time_at(&self, timestamp: Duration) -> Option<f64> {

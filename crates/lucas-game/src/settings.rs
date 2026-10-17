@@ -1,5 +1,5 @@
-//! File discovery only. Feed each candidate's text to lucas-geometry's parser;
-//! try the next candidate if reading or parsing fails. No duplicate HUD parser.
+//! File discovery only. See the crate README's Settings and windows section for
+//! the consumer contract and planned HUD parser integration.
 
 use std::{
     fs, io,

@@ -12,6 +12,9 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+#[path = "api_scenario_tests.rs"]
+mod scenario;
+
 type Routes = BTreeMap<&'static str, (u16, String)>;
 
 fn fixtures() -> Routes {
@@ -44,6 +47,7 @@ struct MockServer {
     url: String,
     root: String,
     requests: Arc<Mutex<Vec<String>>>,
+    routes: Arc<Mutex<Routes>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -79,6 +83,8 @@ impl MockServer {
         let thread_stop = stop.clone();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let thread_requests = requests.clone();
+        let routes = Arc::new(Mutex::new(routes));
+        let thread_routes = routes.clone();
         let thread = thread::spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 let (socket, _) = match listener.accept() {
@@ -118,7 +124,9 @@ impl MockServer {
                 }
                 thread_requests.lock().unwrap().push(path.clone());
                 let endpoint = path.strip_prefix("/liveclientdata/").unwrap_or("");
-                let (status, body) = routes
+                let (status, body) = thread_routes
+                    .lock()
+                    .unwrap()
                     .get(endpoint)
                     .cloned()
                     .unwrap_or((404, String::new()));
@@ -139,6 +147,7 @@ impl MockServer {
             url,
             root,
             requests,
+            routes,
             stop,
             thread: Some(thread),
         }

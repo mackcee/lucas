@@ -1,7 +1,8 @@
 # lucas-game
 
 Read-only game-state integration for the Windows MVP. Portable logic and HTTPS
-tests run on Linux; only `Win32WindowProbe` is Windows-specific.
+tests run on Linux; `Win32WindowProbe` and the default Windows settings-path
+locator are Windows-specific.
 
 ## Integration contract
 
@@ -25,23 +26,30 @@ tests run on Linux; only `Win32WindowProbe` is Windows-specific.
   sample instead of advancing with wall time, and refuses outage gaps. Precision
   is approximately one poll; pauses are inferred, not directly exposed by Riot.
 - `StateUpdate::deaths` contains exact EventTime values and event IDs, once per
-  session, including catch-up events when attaching mid-game. The core compares
-  them against gaze history for the >=8 s blind-death rule (unknown if history or
-  gaze quality is insufficient). No blind classification is guessed here.
+  session, including catch-up events when attaching mid-game. Active identity must
+  resolve to a unique player ID; champion names are accepted only for death-event
+  attribution, and only when no other player's ID or champion matches. The future
+  core integration must compare deaths against gaze history for the >=8 s
+  blind-death rule (unknown if history or gaze quality is insufficient). No blind
+  classification is guessed here.
 - `StateUpdate::events` includes newly seen objective/turret events without
-  changing coaching behavior. `respawned` tells the core to reset its gap clock.
-  `game_end` is authoritative only for GameEnd. API loss sets phase Ended but can
-  be transient; retain session data until reconnect/session resolution. Event IDs
-  survive outages. A >1 s game-time rollback starts a new session; the API has no
-  stable game ID, so a caller may use `reset()` at a known session boundary.
+  changing coaching behavior. The consumer should reset its gap clock on
+  `respawned`, including when a confirmed death is followed by living gameplay
+  after temporary API or identity loss. That remembered life state resets at a
+  session boundary. `game_end` is authoritative only for GameEnd. API loss sets
+  phase Ended but can be transient; retain session data until reconnect/session
+  resolution. See `GameState`'s API documentation for session-boundary rules.
 
 ## Settings and windows
 
 `SettingsLocator::windows_defaults(explicit_install_root)` checks an explicit
-root, the Riot install manifest, and standard Windows paths. `candidates()` yields
-PersistedSettings.json before game.cfg for each root. Pass `SettingsFile::read()`
-text and its `SettingsFormat` to lucas-geometry's parser, falling through on read
-or parse error. Parsing HUD values is intentionally not duplicated in this crate.
+root, the Riot install manifest, and standard Windows paths. Manifest
+`associated_client` keys are installation directories; only roots containing
+`LeagueClient.exe` are added. `candidates()` yields PersistedSettings.json before
+game.cfg for each root. `SettingsFile::read()` provides text with a `SettingsFormat`
+for the planned lucas-geometry parser, which is not implemented in this checkout.
+The future adapter should fall through on read or parse error; this crate only
+discovers and reads files, not HUD values.
 
 The Win32 probe uses only window/monitor metadata and shell notification state:
 `FindWindowW(RiotWindowClass)`, foreground and geometry checks, and

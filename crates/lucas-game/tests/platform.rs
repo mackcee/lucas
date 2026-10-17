@@ -63,7 +63,18 @@ fn installation_manifest_adds_only_league_roots_and_preserves_explicit_override(
         paths[2].path,
         install.join("Config/PersistedSettings.json")
     );
-    assert_eq!(paths.iter().find_map(|c| c.read().ok()).unwrap(), cfg);
+    let discovered = paths.iter().find_map(|c| c.read().ok()).unwrap();
+    assert_eq!(discovered, cfg);
+    println!("EVIDENCE {}", serde_json::json!({
+        "scenario": "custom installation settings discovery",
+        "manifest_format": "associated_client keyed by installation directories",
+        "explicit_override_first": paths[0].path == explicit.join("Config/PersistedSettings.json"),
+        "discovered_custom_install": paths[2].path == install.join("Config/PersistedSettings.json"),
+        "persisted_settings_missing": paths[2].read().is_err(),
+        "fallback_file": "Config/game.cfg",
+        "read_settings": discovered,
+        "scope": "filesystem discovery and reading; HUD parsing belongs to lucas-geometry"
+    }));
     locator.add_install_manifest(&manifest).unwrap();
     assert_eq!(locator.candidates(), paths);
     fs::write(&manifest, "not json").unwrap();
