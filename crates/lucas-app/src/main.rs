@@ -1,8 +1,19 @@
 //! Thin dispatcher; timer and gaze diagnostics belong in separate modules.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod console;
+
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => return start_timer(),
+        [flag] if flag == "--timer" => return start_timer(),
+        _ => {}
+    }
+    #[cfg(windows)]
+    console::attach_parent();
+
     match args.as_slice() {
         [flag] if flag == "--version" || flag == "-V" => version(),
         [flag] if flag == "--help" || flag == "-h" => {
@@ -10,8 +21,6 @@ fn main() {
                 "LUCAS\n\nUsage: lucas [--timer | --version | --help]\n\nOn Windows, no arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder."
             );
         }
-        [] => start_timer(),
-        [flag] if flag == "--timer" => start_timer(),
         _ => {
             eprintln!("Unknown arguments. Use --help.");
             std::process::exit(2);
