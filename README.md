@@ -36,7 +36,8 @@ may access package registries and advisory databases.
 ## Build and check
 
 Install [Rust via rustup](https://rustup.rs/), then run from the repository root.
-`rust-toolchain.toml` pins stable Rust 1.97.1 with rustfmt and Clippy.
+The toolchain and required components are pinned in
+[`rust-toolchain.toml`](rust-toolchain.toml).
 
 ```sh
 cargo build --workspace
