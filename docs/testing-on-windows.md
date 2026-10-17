@@ -130,9 +130,11 @@ unknown eyes, or low fps are reasons to adjust lighting and placement first.
   mostly still. **Esc** ends early and saves a trace marked cancelled.
 - The minimap target uses `lucas-geometry` at the actual main-monitor resolution.
   Before each test, LUCAS reads `MinimapScale` and `FlipMiniMap` from the discovered
-  League installation's `Config/PersistedSettings.json`. Only when no file is
-  found does it use scale 1 and bottom-right placement. An unreadable, malformed,
-  or incomplete settings file blocks recording rather than silently defaulting.
+  League installation's `Config/PersistedSettings.json`. For a custom installation,
+  set the installation override described under [Start and gate checks](#start-and-gate-checks)
+  before launching diagnostics. Only when no file is found does it use scale 1
+  and bottom-right placement. An unreadable, malformed, or incomplete settings
+  file blocks recording rather than silently defaulting.
   The trace header records the source and values, without the installation path.
   Elsewhere targets stay outside the minimap plus a margin of 4% of screen height.
   This is a geometry seed, not an in-game alignment measurement.
