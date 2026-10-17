@@ -95,6 +95,9 @@ impl MockServer {
                     }
                     Err(e) => panic!("mock accept: {e}"),
                 };
+                // Windows inherits the listener's nonblocking mode; TLS below
+                // uses blocking I/O with timeouts on every platform.
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(1)))
                     .unwrap();
