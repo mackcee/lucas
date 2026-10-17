@@ -45,6 +45,7 @@ pub struct Tick {
 
 struct Session {
     id: String,
+    probe_game: bool,
     start: Timestamp,
     last: Timestamp,
     config: SessionConfig,
@@ -76,6 +77,10 @@ pub struct Runtime {
     sequence: u64,
     summaries: Vec<GameSummary>,
     postgame_ready: bool,
+    next_game_solo: bool,
+    // Survives a gate-mode switch within a match, but not a genuine game end.
+    match_probe: Option<bool>,
+    match_level: Option<(usize, bool)>,
 }
 impl Runtime {
     pub fn new(settings: Settings) -> lucas_store::Result<Self> {
@@ -94,6 +99,9 @@ impl Runtime {
             sequence: 0,
             summaries: Vec::new(),
             postgame_ready: false,
+            next_game_solo: false,
+            match_probe: None,
+            match_level: None,
         })
     }
     pub fn calibration(&self) -> CalibrationState {
@@ -107,6 +115,27 @@ impl Runtime {
     }
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+    /// Settings edits never mutate the policy/metrics snapshot of an active game.
+    /// Persist first, then install, so a failed disk write cannot appear applied.
+    pub fn update_preferences(&mut self, settings: &Settings) -> lucas_store::Result<()> {
+        settings.validate()?;
+        self.settings.level_index = settings.level_index;
+        self.settings.pulse = settings.pulse.clone();
+        self.settings.density_cap = settings.density_cap;
+        Ok(())
+    }
+    pub fn arm_solo(&mut self, armed: bool) {
+        self.next_game_solo = armed;
+    }
+    pub fn solo_armed(&self) -> bool {
+        self.next_game_solo
+    }
+    pub fn solo_active(&self) -> bool {
+        self.session.as_ref().is_some_and(|s| s.probe_game)
+    }
+    pub fn active_level(&self) -> Option<lucas_core::TrainingLevel> {
+        self.session.as_ref().map(|s| s.policy.level())
     }
     pub fn in_session(&self) -> bool {
         self.session.is_some()
@@ -213,7 +242,12 @@ impl Runtime {
             }
             return Ok(());
         };
+        let previous_phase = self.game.phase();
         let update = self.game.update(at, snapshot)?;
+        if update.session_started && previous_phase != GamePhase::NoGame {
+            self.match_probe = None;
+            self.match_level = None;
+        }
         if update.session_started
             || (self.session.is_none()
                 && !matches!(self.game.phase(), GamePhase::NoGame | GamePhase::Ended))
@@ -230,6 +264,8 @@ impl Runtime {
         }
         if update.game_end {
             self.finish(at, unix_ms)?;
+            self.match_probe = None;
+            self.match_level = None;
             self.postgame_ready = true;
         }
         Ok(())
@@ -242,12 +278,19 @@ impl Runtime {
     ) -> Result<(), CoreError> {
         self.sequence += 1;
         self.postgame_ready = false;
-        let level = TRAINING_LEVELS[self.settings.level_index];
+        let (index, density_cap) = *self
+            .match_level
+            .get_or_insert((self.settings.level_index, self.settings.density_cap));
+        let level = TRAINING_LEVELS[index];
         let config = SessionConfig {
-            density_cap: self.settings.density_cap,
+            density_cap,
             ..SessionConfig::default()
         };
+        let probe_game = *self
+            .match_probe
+            .get_or_insert_with(|| std::mem::take(&mut self.next_game_solo));
         self.session = Some(Session {
+            probe_game,
             id: format!("{unix_ms}-{}-{}", std::process::id(), self.sequence),
             start: stamp(at),
             last: stamp(at),
@@ -283,6 +326,8 @@ impl Runtime {
         }
         if !input.window_exists && (!self.settings.live_client_gate || !self.game.api_available()) {
             self.finish(now, unix_ms)?;
+            self.match_probe = None;
+            self.match_level = None;
             self.postgame_ready = true;
         }
         let e = self.game.eligibility(now);
@@ -407,9 +452,12 @@ impl Runtime {
                 s.policy.reset_gap();
             }
             gap_ms = s.metrics.gap_ms();
-            pulse = s
-                .policy
-                .tick(stamp(now), gap_ms, gate.eligible() && !looking, &mut s.rng)?;
+            pulse = s.policy.tick(
+                stamp(now),
+                gap_ms,
+                gate.eligible() && !looking && !s.probe_game,
+                &mut s.rng,
+            )?;
             if let Some(pulse) = pulse {
                 s.metrics.record_pulse(pulse)?;
                 s.events.push(SessionEvent {
@@ -435,7 +483,7 @@ impl Runtime {
         };
         Ok(Tick {
             status,
-            hide: !gate.eligible() || looking,
+            hide: !gate.eligible() || looking || self.solo_active(),
             pulse,
             gap_ms,
         })
@@ -444,6 +492,9 @@ impl Runtime {
     /// so switching modes cannot make an assisted session look unassisted.
     pub fn timer_pulse(&mut self, at: Duration) -> Result<(), CoreError> {
         if let Some(s) = &mut self.session {
+            if s.probe_game {
+                return Ok(());
+            }
             let pulse = Pulse {
                 at: stamp(at),
                 salience: lucas_core::Salience::Medium,
@@ -527,7 +578,7 @@ impl Runtime {
                 role: None,
                 champion: s.champion,
                 length_ms: s.clock.length_ms(),
-                probe_game: false,
+                probe_game: s.probe_game,
                 deaths_available: s.deaths_available,
                 tracking: s.tracking,
             },

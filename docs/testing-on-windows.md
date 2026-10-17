@@ -81,6 +81,82 @@ Record whether the Live Client gate actually became active. If the local API or
 TLS certificate is unavailable, fallback is useful for placement/click-through,
 but **does not pass** the alive/dead/loading portion of G1.
 
+## G3 — three-game MVP check
+
+Use the [Windows artifact download steps](#download-and-run), a connected webcam,
+League **Borderless**, and ordinary supported Summoner's Rift games. Keep
+**Use Live Client gate** on and **Timer mode** off. Practice Tool is deliberately
+not eligible for coaching. This is real-device acceptance; portable tests and
+synthetic UI previews do not establish gaze accuracy, camera-driver behavior or
+native overlay correctness.
+
+### Before the three games
+
+- Launch `lucas.exe` normally. On a new installation the wizard opens. If you
+  already have settings, choose **First-run setup…**. Check the privacy note,
+  select your camera and **Check tracking**. Confirm live face/eye status, fps
+  and the quality indicator respond; stopping or closing releases the camera.
+- Close halfway through setup, then reopen it: it should resume the same step
+  and camera. Try **Skip check for now** at Borderless, then complete calibration.
+  Failed/cancelled calibration must not let you continue. Choose **10 s (start)**
+  and Finish; the window should close to the tray. Restart once and confirm the
+  wizard does not repeat. `--timer` remains an explicit setup-free G1 diagnostic.
+- In **Settings…**, try each pulse style and a distinct colour. Save/reopen to
+  verify persistence. Sound starts off; leave it off unless intentionally testing
+  it. Settings should open only when requested, not steal focus automatically
+  during play. Keep automatic promotion/probe scheduling expectations out of this
+  test: neither is implemented.
+
+### Game 1 — assisted start
+
+- Use **Align minimap…** once eligible, return to League, nudge/resize and save.
+  If this changes the calibration zone, explicitly recalibrate; then complete
+  **Quick check required (4 seconds)** from the tray before continuing play.
+- Check pulses after eligible gaps, no pulse during a sustained map look, and
+  suppression when dead, alt-tabbed, tracking lost or outside supported play.
+  Delays have jitter and a density cap, so they are not exact metronome intervals.
+  Confirm click-through and no focus stealing. Note tracking quality and comfort.
+- Mid-game select **8 s**. The submenu check should change, but this game's goal
+  and policy must stay at 10 s. At game end, the card should retain the old level
+  and show checks, tracking quality and any known/unknown blind deaths.
+
+### Game 2 — the selected level
+
+- Confirm **8 s** survived restart if you restarted. Do the game's quick check.
+  This game should use the newly selected level; the end card should agree.
+- Try a different pulse style/colour and optional sound through Settings, then
+  restore sound off. Saving appearance must not change the game goal. Closing
+  Settings resumes coaching, without opening another calibration automatically.
+- After play, arm **Next game solo (no pulses)**. Confirm the menu is checked and
+  the tray tooltip announces the upcoming solo game. Disarm/rearm once to check
+  both paths. Do not quit LUCAS after arming: the one-shot is session-local.
+
+### Game 3 — solo
+
+- At game start, the tray tooltip should say **Solo game — no pulses or sound;
+  summary after play**. Do the usual quick check. No minimap outline, reminder,
+  sound or live score should appear, even over long gaps. **Align minimap…** is
+  unavailable during solo play. Timer selection must not bypass this suppression.
+- At game end, the card should say **Solo probe**, with zero pulses but measured
+  checks/gaps/tracking and death classifications where evidence exists. Unknown
+  tracking must not inflate blind deaths. The one-shot should no longer be armed;
+  the next game returns to the selected manual level.
+
+### Evidence and cleanup
+
+Record the build commit, Windows/display details, camera/lighting, selected levels,
+any missed/false checks, overlay/focus problems, and all three card results. Summaries
+and event timestamps are in `%LOCALAPPDATA%\lucas\games.sqlite3`; settings are in
+`settings.toml`, calibration in `calibration.json`, and unfinished setup settings/
+weights in `setup-draft.toml`. Use **Open data folder**. Quit before copying the
+SQLite database. The app stores no webcam images; share only what you choose.
+
+After retaining any desired evidence, test **Settings… → Delete all data…**:
+first cancel and confirm data remains, then confirm deletion if you intend to
+remove it. LUCAS must quit before deleting the dedicated data directory. Relaunch
+should start fresh setup. This is irreversible; do not delete the three-game
+results before checking them.
+
 ## G2 — Windows webcam test
 
 This session uses the gaze debug window and opt-in glance recorder, not timer

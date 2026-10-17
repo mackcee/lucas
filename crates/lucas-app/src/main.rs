@@ -7,6 +7,8 @@ mod capture;
 mod console;
 #[cfg(windows)]
 mod debug_ui;
+#[cfg(windows)]
+mod setup_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
@@ -17,6 +19,17 @@ fn main() -> ExitCode {
     if args.is_empty() || matches!(args.as_slice(), [flag] if flag == "--timer") {
         start_tray(!args.is_empty());
         return ExitCode::SUCCESS;
+    }
+    #[cfg(windows)]
+    if matches!(args.as_slice(), [flag] if flag == "--runtime-setup" || flag == "--runtime-settings")
+    {
+        return match setup_ui::run(args[0] == "--runtime-setup") {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("Cannot open LUCAS settings: {error}");
+                ExitCode::FAILURE
+            }
+        };
     }
     #[cfg(windows)]
     console::attach_parent();

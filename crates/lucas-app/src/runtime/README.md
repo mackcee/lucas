@@ -3,11 +3,20 @@
 `lucas` starts gaze coaching in the Windows notification area. `--timer` (or
 **Timer mode (no gaze)** in the tray) explicitly selects the fixed ten-second
 fallback. The stored training level, density cap, pulse style/colour and optional
-sound drive gaze coaching; no level selector or automatic promotion is added.
+sound drive gaze coaching. The tray's **Training level (next game)** submenu and
+**Settings…** select levels manually; automatic promotion remains out of scope.
 
 ## Before play
 
-- With no passing calibration, launch opens the existing calibration surface
+- With no settings file (or an unfinished setup draft), normal launch opens a
+  six-step first-run wizard: privacy, camera/quality, skippable Borderless check,
+  the existing calibration UI, next-game alignment instructions, and starting
+  level. **First-run setup…** reopens it. Close saves the draft; Finish commits
+  settings and calibration. Draft camera choices/weights cannot replace the live
+  pair before Finish; an interrupted commit fails closed and remains resumable.
+  Explicit `--timer` bypasses setup for no-camera diagnostics; switching to gaze
+  invokes setup when required.
+- With saved settings but no passing calibration, launch opens calibration
   **only if League is not running**. Connect the camera and run full calibration.
 - At every game start, choose **Quick check required (4 seconds)** in the tray.
   This deliberately uses a player-initiated window rather than stealing focus
@@ -28,6 +37,28 @@ sound drive gaze coaching; no level selector or automatic promotion is added.
   Closed eyes, low quality, off-screen estimates and stale samples are unknown,
   never minimap checks. Add front lighting or reconnect the camera; switching
   timer mode on and off retries a camera that failed to open.
+
+## Manual controls and solo games
+
+- Level labels and delays come from `lucas-core::TRAINING_LEVELS`. A choice is
+  saved through `lucas-store` before changing the pending preference. The current
+  match keeps its policy, standard and density-cap snapshot, including across a
+  Live Client/window-only gate switch. There is no automatic level progression.
+- **Next game solo (no pulses)** is one-shot, held in memory until the next game
+  starts (not retained across process exit). Its tooltip announces both arming
+  and the active solo game. No pulse, sound or alignment preview appears in that
+  game; measurement and quick validation still operate. Timer selection cannot
+  re-enable assistance during a solo game. Its stored `probe_game` flag produces
+  the existing card's **Solo probe** label. Arming during play selects the next
+  match, not the current one. Gate switches cannot turn a probe into assisted play.
+- **Settings…** exposes level, style, RGB colour and optional sound, plus data
+  folder and confirmed deletion. Settings/setup run in one child process; the
+  tray releases the camera and pauses coaching while it is open. Camera preview
+  and calibration share the debug capture code but have no trace-recording UI.
+  Settings saves are reloaded when the window closes; style/colour/sound apply
+  immediately, level at the next match. Other settings writers are disabled while
+  this child owns the draft. Deletion uses the existing parent-shutdown handshake,
+  so no cached writer can recreate deleted data.
 
 ## Threads, eligibility and privacy
 

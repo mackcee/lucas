@@ -21,6 +21,8 @@ pub struct Desktop {
     camera: Option<CameraWorker>,
     calibration: Option<CalibrationTask>,
     card: Option<Child>,
+    controls: Option<(Child, bool)>,
+    pub controls_notice: Option<String>,
     delete_requested: bool,
     geometry: Option<(ScreenGeometry, [f64; 4])>,
     generation: u64,
@@ -44,6 +46,8 @@ impl Desktop {
             camera: None,
             calibration: None,
             card: None,
+            controls: None,
+            controls_notice: None,
             delete_requested: false,
             geometry: None,
             generation: 0,
@@ -54,6 +58,30 @@ impl Desktop {
                 .join("models"),
             pending: Vec::new(),
         })
+    }
+    pub fn editing(&self) -> bool {
+        self.controls.is_some()
+    }
+    pub fn launch_controls(&mut self, setup: bool) -> Result<()> {
+        if self.editing() || self.calibrating() {
+            return Ok(());
+        }
+        self.camera = None;
+        self.close_card();
+        if setup {
+            // Explicit setup includes recalibration; stale readiness must not
+            // return when setup is cancelled or the camera choice changes.
+            self.runtime.install_calibration(None)?;
+        }
+        let child = Command::new(std::env::current_exe()?)
+            .arg(if setup {
+                "--runtime-setup"
+            } else {
+                "--runtime-settings"
+            })
+            .spawn()?;
+        self.controls = Some((child, setup));
+        Ok(())
     }
     pub fn calibrating(&self) -> bool {
         self.calibration.is_some()
@@ -105,7 +133,7 @@ impl Desktop {
         Ok(())
     }
     pub fn launch_calibration(&mut self) -> Result<()> {
-        if self.calibration.is_some() {
+        if self.calibration.is_some() || self.editing() {
             return Ok(());
         }
         self.camera = None; // joined and released before the child can open it
@@ -138,6 +166,37 @@ impl Desktop {
         Ok(())
     }
     pub fn tick(&mut self, now: Duration, mut inputs: Inputs) -> Result<Tick> {
+        if let Some((child, _)) = &mut self.controls
+            && let Some(status) = child.try_wait()?
+        {
+            let (_, setup) = self.controls.take().unwrap();
+            self.delete_requested |=
+                status.code() == Some(crate::postgame::DELETE_REQUESTED_EXIT_CODE as i32);
+            if status.success() {
+                let settings = Store::open()?.load_settings()?;
+                self.runtime.update_preferences(&settings)?;
+                if setup {
+                    self.reload()?;
+                }
+                self.controls_notice = Some(
+                    if setup {
+                        "Setup complete — align the minimap and quick-check before play"
+                    } else {
+                        "Settings saved — training level applies next game"
+                    }
+                    .into(),
+                );
+            } else if !self.delete_requested {
+                self.controls_notice = Some(
+                    if status.code() == Some(3) {
+                        "Settings closed; resume setup from the tray if needed"
+                    } else {
+                        "Settings window failed; reopen it from the tray to retry"
+                    }
+                    .into(),
+                );
+            }
+        }
         if let Some(task) = &mut self.calibration
             && let Some(status) = task.child.try_wait()?
         {
@@ -149,10 +208,12 @@ impl Desktop {
                 self.reload()?;
             }
         }
-        inputs.paused |= self.calibrating();
-        let wanted =
-            self.runtime
-                .camera_wanted(inputs.window_exists, inputs.gaze_mode, self.calibrating());
+        inputs.paused |= self.calibrating() || self.editing() || self.delete_requested;
+        let wanted = self.runtime.camera_wanted(
+            inputs.window_exists,
+            inputs.gaze_mode,
+            self.calibrating() || self.editing() || self.delete_requested,
+        );
         if !wanted {
             self.camera = None;
         } else if self.camera.is_none() {
@@ -173,7 +234,7 @@ impl Desktop {
         if !self.runtime.in_session() {
             self.camera = None;
         }
-        if self.runtime.postgame_ready() {
+        if self.runtime.postgame_ready() && !self.editing() && !self.delete_requested {
             for summary in &self.pending {
                 Store::open()?.save_summary(summary)?;
             }
@@ -218,6 +279,10 @@ impl Drop for Desktop {
         if let Some(mut task) = self.calibration.take() {
             let _ = task.child.kill();
             let _ = task.child.wait();
+        }
+        if let Some((mut child, _)) = self.controls.take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
         self.close_card();
     }

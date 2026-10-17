@@ -801,3 +801,194 @@ fn historical_deaths_and_window_only_summary_do_not_invent_gaze_or_death_data() 
     assert!(!summary.context.deaths_available);
     assert_eq!(summary.metrics.blind_deaths, 0);
 }
+
+#[test]
+fn saved_level_waits_for_next_match_even_across_gate_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_in(dir.path()).unwrap();
+    let mut runtime = Runtime::new(Settings::default()).unwrap();
+    runtime
+        .poll(Duration::ZERO, Some(&snapshot(100.0, false, vec![])), 0)
+        .unwrap();
+    let initial = runtime.active_level().unwrap();
+    let mut settings = runtime.settings().clone();
+    settings.level_index = lucas_core::TRAINING_LEVELS.len() - 2;
+    store.save_settings(&settings).unwrap();
+    runtime
+        .update_preferences(&store.load_settings().unwrap())
+        .unwrap();
+    assert_eq!(runtime.active_level(), Some(initial));
+    assert_eq!(
+        Runtime::new(store.load_settings().unwrap())
+            .unwrap()
+            .settings()
+            .level_index,
+        settings.level_index
+    );
+    // Switching gate is not permission to change the level mid-match.
+    runtime
+        .set_live_gate(false, Duration::from_secs(1), 1000)
+        .unwrap();
+    runtime
+        .tick(Duration::from_secs(1), inputs(), None, 1000)
+        .unwrap();
+    assert_eq!(runtime.active_level(), Some(initial));
+    runtime
+        .tick(Duration::from_secs(2), Inputs::default(), None, 2000)
+        .unwrap();
+    runtime
+        .tick(Duration::from_secs(3), inputs(), None, 3000)
+        .unwrap();
+    assert_eq!(
+        runtime.active_level(),
+        Some(lucas_core::TRAINING_LEVELS[settings.level_index])
+    );
+    assert!(
+        runtime
+            .take_summaries()
+            .iter()
+            .all(|s| s.initial_level == initial)
+    );
+}
+
+#[test]
+fn solo_game_measures_checks_and_deaths_stores_probe_and_resets_for_next_game() {
+    let model = fitted();
+    let [l, t, r, b] = model.screen().minimap;
+    let map = [(l + r) / 2.0, (t + b) / 2.0];
+    let mut runtime = Runtime::new(Settings {
+        density_cap: false,
+        ..Settings::default()
+    })
+    .unwrap();
+    runtime.arm_solo(true);
+    runtime.arm_solo(false);
+    assert!(!runtime.solo_armed());
+    runtime.arm_solo(true);
+    assert!(runtime.solo_armed());
+    for i in 0..=500 {
+        let ms = 1 + i * 50;
+        let at = Duration::from_millis(ms);
+        if i % 20 == 0 {
+            let deaths = if ms >= 13000 {
+                vec![event(1, 102.0, "ChampionKill")]
+            } else {
+                vec![]
+            };
+            runtime
+                .poll(
+                    at,
+                    Some(&snapshot(90.0 + ms as f64 / 1000.0, false, deaths)),
+                    ms,
+                )
+                .unwrap();
+            if i == 0 {
+                ready(&mut runtime, model.clone());
+            }
+        }
+        assert!(runtime.solo_active());
+        assert!(!runtime.solo_armed());
+        let tick = runtime
+            .tick(
+                at,
+                inputs(),
+                Some(sample(
+                    ms,
+                    if (1000..1500).contains(&ms) || (20000..20500).contains(&ms) {
+                        map
+                    } else {
+                        [0.5, 0.5]
+                    },
+                )),
+                ms,
+            )
+            .unwrap();
+        assert!(tick.hide);
+        assert!(tick.pulse.is_none());
+        runtime.timer_pulse(at).unwrap(); // timer mode cannot contaminate a probe
+    }
+    runtime
+        .poll(
+            Duration::from_secs(26),
+            Some(&snapshot(
+                116.0,
+                false,
+                vec![event(1, 102.0, "ChampionKill"), event(2, 116.0, "GameEnd")],
+            )),
+            26000,
+        )
+        .unwrap();
+    assert!(!runtime.solo_active());
+    assert!(!runtime.solo_armed());
+    let summary = runtime.take_summaries().remove(0);
+    assert!(summary.context.probe_game);
+    assert_eq!(summary.metrics.pulses, 0);
+    assert!(summary.metrics.eligible_ms > 20000);
+    assert!(
+        summary
+            .events
+            .iter()
+            .any(|e| matches!(e.kind, StoredEventKind::Check))
+    );
+    assert_eq!(summary.metrics.blind_deaths, 1);
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open_in(dir.path()).unwrap();
+    store.save_summary(&summary).unwrap();
+    let stored = store.summary(&summary.id).unwrap().unwrap();
+    assert!(stored.context.probe_game);
+    assert_eq!(stored.metrics.pulses, 0);
+    runtime
+        .poll(
+            Duration::from_secs(30),
+            Some(&snapshot(0.0, false, vec![])),
+            30000,
+        )
+        .unwrap();
+    assert!(runtime.in_session());
+    assert!(!runtime.solo_active());
+}
+
+#[test]
+fn arming_during_play_only_affects_next_match_and_solo_survives_gate_switch() {
+    let mut runtime = Runtime::new(Settings::default()).unwrap();
+    runtime
+        .poll(Duration::ZERO, Some(&snapshot(100.0, false, vec![])), 0)
+        .unwrap();
+    runtime.arm_solo(true);
+    assert!(!runtime.solo_active());
+    runtime
+        .set_live_gate(false, Duration::from_secs(1), 1000)
+        .unwrap();
+    runtime
+        .tick(Duration::from_secs(1), inputs(), None, 1000)
+        .unwrap();
+    assert!(!runtime.solo_active());
+    assert!(runtime.solo_armed());
+    runtime
+        .tick(Duration::from_secs(2), Inputs::default(), None, 2000)
+        .unwrap();
+    runtime
+        .tick(Duration::from_secs(3), inputs(), None, 3000)
+        .unwrap();
+    assert!(runtime.solo_active());
+    runtime
+        .set_live_gate(true, Duration::from_secs(4), 4000)
+        .unwrap();
+    runtime
+        .poll(
+            Duration::from_secs(5),
+            Some(&snapshot(104.0, false, vec![])),
+            5000,
+        )
+        .unwrap();
+    assert!(runtime.solo_active());
+    runtime.timer_pulse(Duration::from_secs(6)).unwrap();
+    runtime.finish(Duration::from_secs(7), 7000).unwrap();
+    assert!(
+        runtime
+            .take_summaries()
+            .iter()
+            .filter(|s| s.context.probe_game)
+            .all(|s| s.metrics.pulses == 0)
+    );
+}

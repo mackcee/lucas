@@ -48,6 +48,30 @@ The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
 can also be built and checked on Linux. Builds will initially be unsigned.
 
+## Getting started
+
+1. **Download** the Windows build from [GitHub Actions](https://github.com/mackcee/lucas/actions)
+   (see the [download steps](docs/testing-on-windows.md)). Extract the whole archive,
+   keeping `models/` and the runtime DLLs beside `lucas.exe`. Builds are unsigned.
+2. **Run `lucas.exe`.** First-run setup walks through camera choice and live tracking
+   quality, a skippable Borderless check, calibration, next-game minimap alignment
+   and a starting level. Frames are never stored; nothing leaves your PC. Close setup
+   to save your place, then reopen **First-run setup…** from the notification-area
+   icon. Finish returns to the tray. In your next game, choose **Align minimap…**,
+   then complete the tray's quick gaze check before play. Changed geometry may need
+   explicit recalibration.
+3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
+   move through 8 → 6 → 5 s. Fade levels keep the 5 s goal but delay and soften the
+   help, make it intermittent, then turn it off. A saved level applies **next game**,
+   never mid-game. Settings also offers pulse style, colour and sound (off by default),
+   **Open data folder** and confirmed **Delete all data**.
+4. **Try a solo game.** Arm **Next game solo (no pulses)** before starting. The tray
+   tooltip announces it when armed and when play starts. That game has no visual or
+   sound pulses, but still measures your checks; its post-game card says **Solo probe**.
+   The choice is one-shot, not an automatic schedule, and is cleared on app exit.
+
+For the three-game MVP check, follow [G3](docs/testing-on-windows.md#g3--three-game-mvp-check).
+
 ## Privacy
 
 LUCAS has a local-only privacy contract: webcam frames never leave RAM and are
@@ -55,7 +79,7 @@ never written to disk. Nothing is sent off the machine. The only
 network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
-Normal-use local persistence is limited to settings, calibration, and per-game summaries
+Normal-use local persistence is limited to settings (including a resumable setup draft), calibration, and per-game summaries
 (including event timestamps); see the [storage reference](crates/lucas-store/README.md)
 for files and deletion scope. The tray records games; the standalone viewer only
 opens saved summaries.

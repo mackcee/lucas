@@ -28,7 +28,7 @@ use std::{
 };
 use tray_icon::{
     Icon, TrayIconBuilder,
-    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
 };
 use windows_sys::Win32::{
     Foundation::*,
@@ -71,6 +71,9 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let origin = Instant::now();
     let worker = ApiWorker::start(origin)?;
     let mut gaze = crate::runtime::desktop::Desktop::new(origin)?;
+    // Explicit --timer remains a no-camera diagnostic fallback. Normal launch
+    // (or switching to gaze below) requires first-run setup.
+    let mut setup_pending = !timer_mode && crate::preferences::needs_setup(&folder)?;
     let mut timer = Timer::default();
     if !gaze.runtime.settings().live_client_gate {
         timer.set_mode(GateMode::WindowOnly);
@@ -92,6 +95,25 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     );
     let timer_option = CheckMenuItem::new("Timer mode (no gaze)", true, timer_mode, None);
     let calibrate = MenuItem::new("Calibrate gaze...", true, None);
+    let levels = Submenu::new("Training level (next game)", true);
+    let level_items: Vec<_> = lucas_core::TRAINING_LEVELS
+        .iter()
+        .enumerate()
+        .map(|(i, level)| {
+            CheckMenuItem::new(
+                crate::preferences::level_label(*level),
+                true,
+                i == gaze.runtime.settings().level_index,
+                None,
+            )
+        })
+        .collect();
+    for item in &level_items {
+        levels.append(item)?;
+    }
+    let solo = CheckMenuItem::new("Next game solo (no pulses)", true, false, None);
+    let preferences = MenuItem::new("Settings...", true, None);
+    let setup = MenuItem::new("First-run setup...", true, None);
     let pause = MenuItem::new("Pause pulses", true, None);
     let align = MenuItem::new("Align minimap...", false, None);
     let report = MenuItem::new("Save minimap numbers", false, None);
@@ -108,6 +130,10 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         &notice_item,
         &PredefinedMenuItem::separator(),
         &pause,
+        &levels,
+        &solo,
+        &preferences,
+        &setup,
         &timer_option,
         &calibrate,
         &align,
@@ -140,7 +166,9 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         gaze.geometry(screen, rect)?;
     }
     // Never steal game focus: quick checks and mid-game recalibration are tray actions.
-    if !timer_mode
+    if setup_pending {
+        gaze.launch_controls(true)?;
+    } else if !timer_mode
         && !probe.sample().unwrap_or_default().exists
         && gaze.runtime.calibration() == crate::runtime::CalibrationState::Needed
     {
@@ -219,15 +247,59 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         let now = origin.elapsed();
         let game = gaze.runtime.eligibility(now);
         let game_allowed = timer.mode() == GateMode::WindowOnly || game.eligible();
-        align.set_enabled(context.is_some() && window.exists && game_allowed);
+        let suppress = gaze.runtime.solo_active()
+            || gaze.editing()
+            || setup_pending
+            || (gaze.runtime.solo_armed() && !gaze.runtime.in_session() && window.exists);
+        if suppress {
+            alignment = None;
+        }
+        align.set_enabled(context.is_some() && window.exists && game_allowed && !suppress);
+        levels.set_enabled(!gaze.editing() && !gaze.calibrating() && !setup_pending);
+        live_gate.set_enabled(!gaze.editing() && !gaze.calibrating() && !setup_pending);
+        preferences.set_enabled(!gaze.editing() && !gaze.calibrating());
+        setup.set_enabled(!gaze.editing() && !gaze.calibrating());
         report.set_enabled(context.is_some() && window.exists && alignment.is_none());
 
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == *quit.id() {
                 quit_requested = true;
+            } else if let Some(index) = level_items.iter().position(|item| event.id == *item.id()) {
+                if gaze.editing() || gaze.calibrating() || setup_pending {
+                    continue;
+                }
+                let mut updated = gaze.runtime.settings().clone();
+                updated.level_index = index;
+                match lucas_store::Store::open().and_then(|s| s.save_settings(&updated)) {
+                    Ok(()) => {
+                        gaze.runtime.update_preferences(&updated)?;
+                        notice_item
+                            .set_text("Training level saved — applies next game, not this one");
+                    }
+                    Err(error) => notice_item.set_text(format!("Level not saved: {error}")),
+                }
+            } else if event.id == *solo.id() {
+                gaze.runtime.arm_solo(solo.is_checked());
+                notice_item.set_text(if gaze.runtime.solo_armed() {
+                    "Next game is solo: no visual or sound pulses; summary after play"
+                } else {
+                    "Solo game disarmed"
+                });
+                last_status.clear(); // refresh the persistent tooltip announcement
+            } else if event.id == *preferences.id() || event.id == *setup.id() {
+                alignment = None;
+                if let Err(error) = gaze.launch_controls(
+                    crate::preferences::needs_setup(&folder)? || event.id == *setup.id(),
+                ) {
+                    notice_item.set_text(format!("Cannot open settings: {error}"));
+                }
             } else if event.id == *timer_option.id() {
                 timer_mode = timer_option.is_checked();
                 timer.reset();
+                if !timer_mode && crate::preferences::needs_setup(&folder)? {
+                    setup_pending = true;
+                    gaze.launch_controls(true)?;
+                }
                 notice_item.set_text(if timer_mode {
                     "Timer mode: no gaze; fixed 10-second reminders"
                 } else {
@@ -247,6 +319,9 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 });
                 notice_item.set_text("Pulse pause changed");
             } else if event.id == *live_gate.id() {
+                if gaze.editing() || gaze.calibrating() || setup_pending {
+                    continue;
+                }
                 let mode = if live_gate.is_checked() {
                     GateMode::LiveClient
                 } else {
@@ -270,6 +345,8 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 if let Some(key) = key
                     && !target.is_null()
                     && game_allowed
+                    && !suppress
+                    && !gaze.editing()
                 {
                     alignment = None;
                     match Preview::new(target) {
@@ -314,7 +391,8 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         // Re-evaluate after menu mode changes. API stale state is cleared there.
         let game = gaze.runtime.eligibility(now);
         let game_allowed = timer.mode() == GateMode::WindowOnly || game.eligible();
-        let alignment_visible = window.overlay_eligible() && game_allowed;
+        let alignment_visible =
+            window.overlay_eligible() && game_allowed && !suppress && !gaze.editing();
         for action in keys {
             // Queued keys after alt-tab or a profile change must do nothing.
             if !alignment_visible {
@@ -419,31 +497,54 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 window_exists: window.exists,
                 foreground: window.overlay_eligible(),
                 geometry_ready,
-                gaze_mode: !timer_mode,
-                paused: timer.paused() || alignment.is_some(),
+                gaze_mode: (!timer_mode || gaze.runtime.solo_active()) && !setup_pending,
+                paused: timer.paused() || alignment.is_some() || setup_pending,
             },
         )?;
+        if gaze.deletion_requested()? {
+            delete_requested = true;
+            break;
+        }
         calibrate.set_text(match gaze.runtime.calibration() {
             crate::runtime::CalibrationState::Needed => "Calibration needed / recalibrate...",
             crate::runtime::CalibrationState::QuickCheck => "Quick check required (4 seconds)...",
             crate::runtime::CalibrationState::Ready => "Recalibrate gaze...",
         });
-        calibrate.set_enabled(!gaze.calibrating());
+        calibrate.set_enabled(!gaze.calibrating() && !gaze.editing() && !setup_pending);
+        if !gaze.editing() {
+            setup_pending =
+                (setup_pending || !timer_mode) && crate::preferences::needs_setup(&folder)?;
+        }
+        if let Some(notice) = gaze.controls_notice.take() {
+            notice_item.set_text(notice);
+        }
+        for (index, item) in level_items.iter().enumerate() {
+            item.set_checked(index == gaze.runtime.settings().level_index);
+        }
+        solo.set_checked(gaze.runtime.solo_armed());
         let decision = timer.tick(
             now,
             Inputs {
                 game,
                 window,
                 geometry_ready,
-                aligning: alignment.is_some(),
+                aligning: alignment.is_some()
+                    || gaze.editing()
+                    || setup_pending
+                    || gaze.runtime.solo_active()
+                    || gaze.calibrating(),
             },
         );
         if let Some((_, native)) = overlay.as_mut() {
-            let result = if if timer_mode {
-                decision.hide
-            } else {
-                gaze_tick.hide
-            } {
+            let result = if gaze.runtime.solo_active()
+                || gaze.editing()
+                || setup_pending
+                || gaze.calibrating()
+                || if timer_mode {
+                    decision.hide
+                } else {
+                    gaze_tick.hide
+                } {
                 native.hide()
             } else if if timer_mode {
                 decision.pulse
@@ -454,9 +555,11 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 if timer_mode {
                     gaze.runtime.timer_pulse(now)?;
                 }
-                if !timer_mode {
+                {
                     let settings = &gaze.runtime.settings().pulse;
-                    pulse.salience = gaze_tick.pulse.unwrap().salience;
+                    if let Some(request) = gaze_tick.pulse {
+                        pulse.salience = request.salience;
+                    }
                     pulse.colour = lucas_overlay::Colour(
                         settings.colour_rgb[0],
                         settings.colour_rgb[1],
@@ -476,7 +579,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                     };
                 }
                 let shown = native.show_pulse(pulse);
-                if shown.is_ok() && !timer_mode && gaze.runtime.settings().pulse.sound {
+                if shown.is_ok() && gaze.runtime.settings().pulse.sound {
                     unsafe {
                         MessageBeep(MB_OK);
                     }
@@ -493,7 +596,11 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 }
             }
         }
-        let text = if alignment.is_some() {
+        let text = if gaze.runtime.solo_active() {
+            "Solo game — no pulses or sound; summary after play"
+        } else if gaze.editing() || setup_pending {
+            "Setup / settings — coaching paused"
+        } else if alignment.is_some() {
             "Paused — aligning minimap (Enter saves, Esc cancels)"
         } else if timer.paused() {
             "Paused"
@@ -523,10 +630,18 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 Status::Waiting => "Waiting for a game / alive player / League foreground",
             }
         };
-        if text != last_status {
+        let tooltip = format!(
+            "LUCAS — {text}{}",
+            if gaze.runtime.solo_armed() {
+                " · Next game solo (no pulses)"
+            } else {
+                ""
+            }
+        );
+        if tooltip != last_status {
             status_item.set_text(text);
-            tray.set_tooltip(Some(format!("LUCAS — {text}")))?;
-            last_status = text.into();
+            tray.set_tooltip(Some(&tooltip))?;
+            last_status = tooltip;
         }
         // Sleeping is bounded; overlay has its own 16 ms foreground gate. The
         // preview additionally checks that same gate in its WM_TIMER handler.

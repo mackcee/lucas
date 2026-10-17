@@ -86,6 +86,9 @@ fn run_impl(
                 runtime_kind,
                 quick_snapshot,
                 runtime_passed: result,
+                setup_camera: None,
+                setup_profile: None,
+                setup_cancelled: false,
             };
             app.refresh_cameras();
             Ok(Box::new(app))
@@ -152,7 +155,7 @@ struct Test {
 struct Pending {
     started: Instant,
 }
-struct DebugApp {
+pub(crate) struct DebugApp {
     window: std::sync::Arc<winit::window::Window>,
     monitor: Monitor,
     seconds: u64,
@@ -171,13 +174,63 @@ struct DebugApp {
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
     runtime_passed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    setup_camera: Option<u32>,
+    pub(crate) setup_profile: Option<lucas_store::Calibration>,
+    pub(crate) setup_cancelled: bool,
 }
 impl DebugApp {
+    /// Reuses the actual calibration surface inside setup, with no second process
+    /// or camera owner. Setup alone commits settings when the wizard finishes.
+    pub(crate) fn for_setup(
+        window: std::sync::Arc<winit::window::Window>,
+        models: PathBuf,
+        camera: u32,
+    ) -> Result<Self, String> {
+        let handle = window.primary_monitor().ok_or("main monitor unavailable")?;
+        let monitor = Monitor {
+            resolution: [handle.size().width, handle.size().height],
+            handle,
+        };
+        let mut app = Self {
+            window,
+            monitor,
+            seconds: 600,
+            models,
+            cameras: Vec::new(),
+            selected: 0,
+            worker: None,
+            lighting: String::new(),
+            consent: false,
+            error: None,
+            pending: None,
+            test: None,
+            requested: RunKind::Calibrate,
+            measurements: [531.0, 299.0, 650.0],
+            calibration_result: None,
+            runtime_kind: Some(RunKind::Calibrate),
+            quick_snapshot: None,
+            runtime_passed: Default::default(),
+            setup_camera: Some(camera),
+            setup_profile: None,
+            setup_cancelled: false,
+        };
+        app.refresh_cameras();
+        if !app.cameras.iter().any(|c| c.index == camera) {
+            return Err(
+                "Selected camera is unavailable. Go back and choose a connected camera.".into(),
+            );
+        }
+        Ok(app)
+    }
+    pub(crate) fn setup_passed(&self) -> bool {
+        self.runtime_passed
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
     fn refresh_cameras(&mut self) {
         match nokhwa::query(nokhwa::utils::ApiBackend::MediaFoundation) {
             Ok(cameras) => {
                 self.cameras = cameras.into_iter().filter_map(|c| c.index().as_index().ok().map(|index| Camera { index, name: c.human_name() })).collect();
-                let preferred = lucas_store::Store::open().and_then(|s| s.load_settings()).map_or(0, |s| s.camera_index);
+                let preferred = self.setup_camera.unwrap_or_else(|| lucas_store::Store::open().and_then(|s| s.load_settings()).map_or(0, |s| s.camera_index));
                 self.selected = self.cameras.iter().position(|c| c.index == preferred).unwrap_or(0);
                 self.error = None;
             }
@@ -214,9 +267,7 @@ impl DebugApp {
                 };
                 let pass = validation.passes(model.target_false_positive_rate());
                 if pass && save {
-                    let store = lucas_store::Store::open()?;
-                    calibration::save(
-                        &store,
+                    let profile = calibration::profile(
                         &model,
                         test.screen,
                         SystemTime::now()
@@ -224,14 +275,22 @@ impl DebugApp {
                             .as_millis()
                             .try_into()?,
                     )?;
-                    let mut settings = store.load_settings()?;
-                    settings.camera_index = self.cameras[self.selected].index;
-                    store.save_settings(&settings)?;
+                    if self.setup_camera.is_some() {
+                        self.setup_profile = Some(profile);
+                    } else {
+                        let store = lucas_store::Store::open()?;
+                        store.save_calibration(&profile)?;
+                        let mut settings = store.load_settings()?;
+                        settings.camera_index = self.cameras[self.selected].index;
+                        store.save_settings(&settings)?;
+                    }
                 }
                 if pass && self.runtime_kind.is_some() {
                     self.runtime_passed
                         .store(true, std::sync::atomic::Ordering::Release);
-                    context.send_viewport_cmd(ViewportCommand::Close);
+                    if self.setup_camera.is_none() {
+                        context.send_viewport_cmd(ViewportCommand::Close);
+                    }
                 }
                 Ok(Some(format!(
                     "{} · {:.2}° mean error\nMinimap sensitivity {:.1}% · elsewhere false positives {:.2}% · usable frames {:.0}%\n{}\nDistance is assumed; this short validation is not the G2 recording gate.",
@@ -572,11 +631,14 @@ impl DebugApp {
             .and_then(|w| w.shared.lock().unwrap().saved.clone());
         egui::CentralPanel::default().show(root, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
+                if self.setup_camera.is_some() && ui.button("Back to setup").clicked() {
+                    self.setup_cancelled = true;
+                }
                 ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Quick check before play", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
                 ui.label(if self.runtime_kind.is_some() { "Connect your calibrated camera, then start below. Coaching stays paused until validation passes. Close this window to cancel." } else { "Check camera placement and lighting before recording your glance test." });
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    ui.add_enabled_ui(!running && self.pending.is_none(), |ui| {
+                    ui.add_enabled_ui(!running && self.pending.is_none() && self.setup_camera.is_none(), |ui| {
                         egui::ComboBox::from_label("Camera").selected_text(self.cameras.get(self.selected).map_or("No camera found", |c| c.name.as_str())).show_ui(ui, |ui| {
                             for (i, camera) in self.cameras.iter().enumerate() { ui.selectable_value(&mut self.selected, i, &camera.name); }
                         });

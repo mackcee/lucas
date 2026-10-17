@@ -5,6 +5,7 @@
 pub mod calibration;
 pub mod eval;
 pub mod postgame;
+pub mod preferences;
 pub mod runtime;
 pub mod script;
 #[forbid(unsafe_code)]
