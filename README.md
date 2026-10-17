@@ -17,12 +17,14 @@ Early development: **M1.1 implements the pure training core**. See
 and metrics. **M2.1 adds the standalone `lucas-geometry` library**; see its
 [geometry and settings reference](crates/lucas-geometry/README.md). **M2.2 adds the
 standalone `lucas-overlay` library**; see its [overlay and Windows integration
-reference](crates/lucas-overlay/README.md). **M4.1 adds the
+reference](crates/lucas-overlay/README.md). **M3.1 adds the `lucas-game` library**
+for local game-state integration; see its
+[integration contract](crates/lucas-game/README.md). **M4.1 adds the
 [`lucas-gaze`](crates/lucas-gaze/README.md) library** with Windows webcam capture,
 offline face/iris landmarks and filtered gaze features. These libraries are not yet
 integrated into the `lucas` binary, which still only prints its version.
-Calibration, game integration, storage and application wiring are not implemented
-yet. Running the current binary does not open a camera or make network requests.
+Calibration, storage and application wiring are not implemented yet. Running the
+current binary does not open a camera or make network requests.
 
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
