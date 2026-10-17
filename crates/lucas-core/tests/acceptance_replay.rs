@@ -66,15 +66,27 @@ fn emit_storage_payload(record: SessionRecord) {
 #[test]
 fn replay_each_programme_level_from_gaze_to_pulse_check_and_summary() {
     let expected_delays = [
-        None, Some(9_500), Some(7_600), Some(5_700), Some(4_750),
-        Some(5_700), Some(7_600), Some(9_500), Some(14_250), None,
+        None,
+        Some(9_500),
+        Some(7_600),
+        Some(5_700),
+        Some(4_750),
+        Some(5_700),
+        Some(7_600),
+        Some(9_500),
+        Some(14_250),
+        None,
     ];
-    for (index, (level, expected_delay)) in TRAINING_LEVELS
-        .into_iter().zip(expected_delays).enumerate()
+    for (index, (level, expected_delay)) in
+        TRAINING_LEVELS.into_iter().zip(expected_delays).enumerate()
     {
         let mut session = Session::new(
-            format!("programme-level-{index}"), SessionConfig::default(), level, QuarterRng,
-        ).unwrap();
+            format!("programme-level-{index}"),
+            SessionConfig::default(),
+            level,
+            QuarterRng,
+        )
+        .unwrap();
         let check_start = expected_delay.unwrap_or(20_000) + 500;
         let end = check_start + 500;
         let mut pulses = Vec::new();
@@ -108,13 +120,23 @@ fn replay_each_programme_level_from_gaze_to_pulse_check_and_summary() {
         assert_eq!(checks[0].at, Timestamp(check_start + 100));
         assert_eq!(checks[0].prompted, expected_delay.is_some());
         assert_eq!(checks[0].pulse_latency_ms, expected_delay.map(|_| 600));
-        assert_eq!(session.death(Timestamp(end)).unwrap().classification, DeathClassification::Seen);
+        assert_eq!(
+            session.death(Timestamp(end)).unwrap().classification,
+            DeathClassification::Seen
+        );
         let record = session.finish(Timestamp(end)).unwrap();
         assert_eq!(record.metrics.pulses, pulses.len() as u64);
         assert_eq!(record.metrics.checks, 1);
         assert_eq!(record.metrics.mean_dwell_ms, Some(300.0));
         assert_eq!(record.metrics.seen_deaths, 1);
-        assert_eq!(record.events.iter().filter(|e| matches!(e.kind, EventKind::GateChanged(_))).count(), 1);
+        assert_eq!(
+            record
+                .events
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::GateChanged(_)))
+                .count(),
+            1
+        );
         emit_storage_payload(record);
     }
 }
@@ -122,15 +144,48 @@ fn replay_each_programme_level_from_gaze_to_pulse_check_and_summary() {
 #[test]
 fn replay_death_evidence_and_delayed_delivery_into_storage_payloads() {
     for (name, end, death_at, paused, expected) in [
-        ("short-history", 5_000, 5_000, false, DeathClassification::Unknown),
-        ("exact-eight-second-gap", 8_300, 8_300, false, DeathClassification::Blind),
-        ("paused-minimap-view", 10_000, 10_000, true, DeathClassification::Unknown),
-        ("delayed-death-after-new-check", 12_000, 8_300, false, DeathClassification::Blind),
+        (
+            "short-history",
+            5_000,
+            5_000,
+            false,
+            DeathClassification::Unknown,
+        ),
+        (
+            "exact-eight-second-gap",
+            8_300,
+            8_300,
+            false,
+            DeathClassification::Blind,
+        ),
+        (
+            "paused-minimap-view",
+            10_000,
+            10_000,
+            true,
+            DeathClassification::Unknown,
+        ),
+        (
+            "delayed-death-after-new-check",
+            12_000,
+            8_300,
+            false,
+            DeathClassification::Blind,
+        ),
     ] {
-        let mut session = Session::new(name, SessionConfig::default(), TRAINING_LEVELS[1], QuarterRng).unwrap();
+        let mut session = Session::new(
+            name,
+            SessionConfig::default(),
+            TRAINING_LEVELS[1],
+            QuarterRng,
+        )
+        .unwrap();
         for at in (0..=end).step_by(50) {
-            let looking = paused || (name != "short-history" && (at < 300 || (11_000..11_300).contains(&at)));
-            session.observe(sample(at, looking), GateInputs { paused, ..gate(at) }).unwrap();
+            let looking =
+                paused || (name != "short-history" && (at < 300 || (11_000..11_300).contains(&at)));
+            session
+                .observe(sample(at, looking), GateInputs { paused, ..gate(at) })
+                .unwrap();
         }
         let death = session.death(Timestamp(death_at)).unwrap();
         assert_eq!(death.classification, expected);
@@ -145,7 +200,14 @@ fn replay_death_evidence_and_delayed_delivery_into_storage_payloads() {
         }
         assert_eq!(session.death(Timestamp(death_at)).unwrap(), death);
         let record = session.finish(Timestamp(end)).unwrap();
-        assert_eq!(record.events.iter().filter(|e| matches!(e.kind, EventKind::Death(_))).count(), 1);
+        assert_eq!(
+            record
+                .events
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::Death(_)))
+                .count(),
+            1
+        );
         emit_storage_payload(record);
     }
 }

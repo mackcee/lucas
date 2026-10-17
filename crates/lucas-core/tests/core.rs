@@ -19,12 +19,30 @@ fn gate() -> GateInputs {
 }
 fn suppressed_gates() -> [GateInputs; 6] {
     [
-        GateInputs { active_game: false, ..gate() },
-        GateInputs { alive: false, ..gate() },
-        GateInputs { game_time_ms: 90_000, ..gate() },
-        GateInputs { foreground: false, ..gate() },
-        GateInputs { face_tracked: false, ..gate() },
-        GateInputs { paused: true, ..gate() },
+        GateInputs {
+            active_game: false,
+            ..gate()
+        },
+        GateInputs {
+            alive: false,
+            ..gate()
+        },
+        GateInputs {
+            game_time_ms: 90_000,
+            ..gate()
+        },
+        GateInputs {
+            foreground: false,
+            ..gate()
+        },
+        GateInputs {
+            face_tracked: false,
+            ..gate()
+        },
+        GateInputs {
+            paused: true,
+            ..gate()
+        },
     ]
 }
 fn observation(at: u64, looking: bool) -> MetricsObservation {
@@ -318,13 +336,7 @@ mod policy {
         assert!(fades.iter().all(|l| l.standard_ms == 5_000));
         assert_eq!(
             fades.iter().map(|l| l.pulse_delay_ms).collect::<Vec<_>>(),
-            [
-                Some(6_000),
-                Some(8_000),
-                Some(10_000),
-                Some(15_000),
-                None
-            ]
+            [Some(6_000), Some(8_000), Some(10_000), Some(15_000), None]
         );
         assert!(TRAINING_LEVELS.iter().all(|l| l.validate().is_ok()));
     }
@@ -333,23 +345,45 @@ mod policy {
         let initial = TRAINING_LEVELS[1];
         let mut policy = PulsePolicy::new(initial, false).unwrap();
         let mut session = Session::new(
-            "levels", SessionConfig::default(), initial, FixedRng(1 << 63),
-        ).unwrap();
+            "levels",
+            SessionConfig::default(),
+            initial,
+            FixedRng(1 << 63),
+        )
+        .unwrap();
         session.observe(sample(0, 0.0), gate()).unwrap();
         let before = session.events().to_vec();
         for invalid in [
-            TrainingLevel { standard_ms: 20_000, ..TRAINING_LEVELS[5] },
-            TrainingLevel { phase: Phase::Fade, ..TRAINING_LEVELS[4] },
-            TrainingLevel { pulse_delay_ms: Some(7_000), ..initial },
-            TrainingLevel { salience: Salience::Soft, ..initial },
-            TrainingLevel { pulse_probability: 0.5, ..initial },
-            TrainingLevel { pulse_probability: f64::NAN, ..initial },
+            TrainingLevel {
+                standard_ms: 20_000,
+                ..TRAINING_LEVELS[5]
+            },
+            TrainingLevel {
+                phase: Phase::Fade,
+                ..TRAINING_LEVELS[4]
+            },
+            TrainingLevel {
+                pulse_delay_ms: Some(7_000),
+                ..initial
+            },
+            TrainingLevel {
+                salience: Salience::Soft,
+                ..initial
+            },
+            TrainingLevel {
+                pulse_probability: 0.5,
+                ..initial
+            },
+            TrainingLevel {
+                pulse_probability: f64::NAN,
+                ..initial
+            },
         ] {
             assert!(invalid.validate().is_err());
             assert!(PulsePolicy::new(invalid, false).is_err());
-            assert!(Session::new(
-                "invalid", SessionConfig::default(), invalid, FixedRng(0),
-            ).is_err());
+            assert!(
+                Session::new("invalid", SessionConfig::default(), invalid, FixedRng(0),).is_err()
+            );
             assert!(policy.set_level(invalid).is_err());
             assert!(session.set_level(invalid).is_err());
             assert_eq!(policy.level(), initial);
@@ -647,7 +681,8 @@ mod metric_tests {
             m.observe(MetricsObservation {
                 gate,
                 ..observation(0, true)
-            }).unwrap();
+            })
+            .unwrap();
             m.observe(observation(10_000, false)).unwrap();
             let death = m.classify_death(Timestamp(10_000)).unwrap();
             assert_eq!(death.classification, DeathClassification::Unknown);
@@ -700,11 +735,15 @@ mod metric_tests {
             }
             m.observe(observation(start + 8_000, false)).unwrap();
             assert_eq!(
-                m.classify_death(Timestamp(start + 8_000)).unwrap().classification,
+                m.classify_death(Timestamp(start + 8_000))
+                    .unwrap()
+                    .classification,
                 DeathClassification::Blind
             );
             assert_eq!(
-                m.classify_death(Timestamp(start + 5_000)).unwrap().classification,
+                m.classify_death(Timestamp(start + 5_000))
+                    .unwrap()
+                    .classification,
                 DeathClassification::Unknown
             );
             if start > 0 {
@@ -797,27 +836,43 @@ mod session_tests {
     fn gate_events_ignore_clock_progress_but_preserve_state_transitions() {
         let mut s = session();
         for at in (0..=2_000).step_by(50) {
-            s.observe(sample(at, 0.0), GateInputs {
-                game_time_ms: 89_000 + at,
-                ..gate()
-            }).unwrap();
+            s.observe(
+                sample(at, 0.0),
+                GateInputs {
+                    game_time_ms: 89_000 + at,
+                    ..gate()
+                },
+            )
+            .unwrap();
         }
-        let changes: Vec<_> = s.events().iter().filter_map(|event| {
-            if let EventKind::GateChanged(gate) = event.kind {
-                Some((event.at, gate.game_time_ms))
-            } else {
-                None
-            }
-        }).collect();
-        assert_eq!(changes, [(Timestamp(0), 89_000), (Timestamp(1_050), 90_050)]);
+        let changes: Vec<_> = s
+            .events()
+            .iter()
+            .filter_map(|event| {
+                if let EventKind::GateChanged(gate) = event.kind {
+                    Some((event.at, gate.game_time_ms))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            changes,
+            [(Timestamp(0), 89_000), (Timestamp(1_050), 90_050)]
+        );
         let mut at = 2_000;
         for changed_gate in suppressed_gates() {
             for gate in [changed_gate, gate()] {
                 at += 50;
                 let update = s.observe(sample(at, 0.0), gate).unwrap();
-                assert_eq!(update.events.iter().filter(|event| {
-                    matches!(event.kind, EventKind::GateChanged(_))
-                }).count(), 1);
+                assert_eq!(
+                    update
+                        .events
+                        .iter()
+                        .filter(|event| { matches!(event.kind, EventKind::GateChanged(_)) })
+                        .count(),
+                    1
+                );
             }
         }
     }
