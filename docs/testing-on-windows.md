@@ -80,3 +80,84 @@ changing League's settings so LUCAS can re-read them.
 Record whether the Live Client gate actually became active. If the local API or
 TLS certificate is unavailable, fallback is useful for placement/click-through,
 but **does not pass** the alive/dead/loading portion of G1.
+
+## G2 — Windows webcam test
+
+This session uses the gaze debug window and opt-in glance recorder, not timer
+mode or gaze-driven coaching. Use Windows 10/11 x64 and an AVX2-capable CPU. No Rust, Python,
+model downloads or developer tools are needed on the test PC.
+
+## Download and run
+
+1. Open [GitHub Actions](https://github.com/mackcee/lucas/actions/workflows/ci.yml),
+   choose the successful run for the intended commit on **main** (or the test PR),
+   and download **lucas-windows-x64** under Artifacts. You may need to sign in.
+   Builds are available on both main pushes and PRs, retained for 14 days.
+2. Extract the artifact download, then extract the inner `lucas-windows-x64.zip`.
+   Keep `lucas.exe`, **all DLLs**, `models/` and `licenses/` together. Do not run
+   the executable from inside a ZIP.
+3. From a terminal in the extracted folder, run `.\lucas.exe --seconds 600` to
+   open gaze diagnostics (double-clicking starts timer mode). Builds are unsigned: after confirming you downloaded
+   the intended repository/commit, SmartScreen may require **More info → Run anyway**.
+4. Select your Logitech C270 and click **Connect camera**. Close Discord/OBS or
+   other apps using the camera if it cannot open. Allow desktop camera access in
+   Windows Settings → Privacy (or Privacy & security) → Camera.
+
+The requested format is 1280×720 MJPEG at 30 fps. The debug view shows **Face
+found**, whether the eyes are usable, raw eye/head features, observed fps, capture /
+inference thread CPU time per frame, and heuristic tracking quality. The marker
+uses camera-space iris ratios: it is **not calibrated**, not a screen position,
+and not a minimap detection. No camera preview is shown or stored. Low quality,
+unknown eyes, or low fps are reasons to adjust lighting and placement first.
+
+## Record the test (about 10 minutes)
+
+- Sit at your normal playing distance. Leave League closed for this test; it
+  displays its own targets on the **Windows main monitor**. Disable notifications
+  and keep the test focused. It uses borderless fullscreen, not exclusive mode.
+- Enter a lighting and placement note (for example, “daylight, ceiling light on,
+  top-centre C270, glasses”). Avoid personal details you do not want to share.
+- Leave duration at **600 seconds** for 100 trials: 50 minimap targets alternating
+  with 50 elsewhere targets. Each trial has a 2-second centre countdown and a
+  4-second target hold. Centre, corners and edges provide calibration inputs;
+  the lower-right corner is represented by the minimap, not a negative target.
+  For a quick equipment check choose **60 seconds**; durations must be multiples
+  of 6, from 60 to 3600 seconds. A short test is not the full evaluation session.
+- Check **I agree to save a numeric trace for this test**, then **Start fullscreen
+  glance test**. Look at the countdown; when the dot appears, look at its centre
+  and keep looking there until it disappears. Keep your head comfortable and
+  mostly still. **Esc** ends early and saves a trace marked cancelled.
+- The minimap target is computed with `lucas-geometry`, default `MinimapScale=1`
+  and bottom-right placement at the actual main-monitor resolution. This is a
+  test target, not an alignment measurement of your League settings.
+- At completion, click **Open traces folder**. Files are at
+  `%LOCALAPPDATA%\lucas\traces\glance-<timestamp>-<pid>.jsonl`.
+  **The file contains no images**, only numeric features/timestamps/targets and
+  the small metadata header (including your note). No trace is made until you
+  opt in. Nothing is uploaded; explicitly send the chosen file back yourself.
+  Delete local traces in Explorer whenever you want.
+
+Repeat once at night because lighting varies. If offline evaluation misses the
+G2 criterion (at least 90% of deliberate minimap glances detected, at most one
+false detection per minute of not looking), try the C270 near the minimap corner
+and repeat, identifying the new position in the note. Detection-rate evaluation
+and fitting are M5.1; this build does not claim that the criterion has passed.
+
+## Troubleshooting / development
+
+- Missing model or hash error: re-extract the complete matching bundle. The app
+  never downloads replacement models. Do not change `SHA256SUMS` to bypass it.
+- Camera stopped / trace save error: check camera permissions, close other camera
+  apps, and check disk space. Reconnect and start a new recording. A crash or
+  forced shutdown can leave an incomplete trace; replay reports that explicitly.
+- Alt-tab/minimizing marks samples unlabelled while unfocused; the clock continues.
+  Countdown and unfocused frames are not ground-truth fixations. Re-run if you
+  were distracted. Stop/cancel uses an explicit end record; the UI reports the
+  saved path only after a successful flush.
+- From a source checkout: `cargo run -p lucas-app -- --debug-gaze --models models`.
+  `lucas.exe --glance-test --seconds 60` opens the same setup; consent is still
+  required. `lucas.exe --check-runtime` checks packaged models/runtime without
+  opening the camera. `--version` and `--help` do not open a window.
+- Offline, on Windows or Linux: `cargo xtask replay path/to/trace.jsonl` prints
+  frames, valid-frame share, observed fps and per-target-kind feature distributions.
+  See [the trace format](../crates/lucas-app/README.md) for timestamp and label semantics.

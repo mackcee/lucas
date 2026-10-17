@@ -32,6 +32,11 @@ summaries. Timer mode does not open a camera. Gaze-driven coaching, calibration
 and per-game storage are not wired into it yet, so games are not automatically
 recorded and the card does not open at game end.
 
+**M4.2 adds a Windows gaze debug window and opt-in numeric glance-test recorder**
+to `lucas`; follow the [Windows testing guide](docs/testing-on-windows.md) to
+download a ready-to-run CI build. Camera access requires clicking Connect camera;
+recording requires a separate opt-in. Gaze diagnostics make no network requests.
+
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
 can also be built and checked on Linux. Builds will initially be unsigned.
@@ -43,13 +48,17 @@ leave RAM and are never written to disk. Nothing is sent off the machine. The on
 network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
-Local persistence is limited to settings, calibration, and per-game summaries
+Normal-use local persistence is limited to settings, calibration, and per-game summaries
 (including event timestamps); see the [storage reference](crates/lucas-store/README.md)
 for files and deletion scope. The current viewer can open and delete saved data,
 but does not capture games. Demo mode uses only unsaved synthetic data.
-Timer mode currently persists only alignment profiles and user-requested numeric
-geometry reports in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game
-API; window-only mode disables polling (an already-running request may finish).
+The opt-in debug glance test additionally
+stores numeric eye/head features, quality, target labels and timestamps, plus a
+camera/monitor metadata header and your lighting note. **No images are stored.**
+Traces stay in `%LOCALAPPDATA%\\lucas\\traces`; sharing is an explicit user action.
+Timer mode persists alignment profiles and user-requested numeric geometry reports
+in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only
+mode disables polling (an already-running request may finish).
 Developer build and dependency-check tools may access package registries and
 advisory databases.
 
@@ -64,6 +73,10 @@ cargo build --workspace
 cargo run --bin lucas -- --version
 # Windows: start timer mode in the notification area
 cargo run --bin lucas -- --timer
+# Windows diagnostics (models from this checkout):
+cargo run --bin lucas -- --debug-gaze --models models
+# Replay numeric traces on Windows or Linux:
+cargo xtask replay path/to/trace.jsonl
 
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -103,8 +116,8 @@ metric interpretation and integration.
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
-| `lucas-app` | `lucas` binary, Windows timer tray, alignment, numeric reports and post-game card |
-| `xtask` | Synthetic-player simulator, offline model conversion and hash verification |
+| `lucas-app` | Windows timer tray, alignment, numeric reports, post-game card, gaze debug UI and opt-in traces |
+| `xtask` | Synthetic-player simulator, trace replay, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
 [above](#status). The gaze library uses hash-pinned MediaPipe models through ONNX

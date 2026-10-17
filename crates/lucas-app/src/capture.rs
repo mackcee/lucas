@@ -1,0 +1,278 @@
+//! Dedicated below-normal-priority capture/inference thread. Shared state carries
+//! only numbers; the gaze crate clears RGB buffers immediately after inference.
+use lucas_app::{
+    script::{Phase, Target},
+    trace::{self, EndReason, FrameRecord, Header, TraceWriter},
+};
+use lucas_gaze::{
+    FaceLandmarks, Frame, GazeSample, GazeSource, Landmarker, MediaPipeLandmarker,
+    WebcamGazeSource, camera::NokhwaCamera, features, models::VerifiedModels, runtime::OrtBackend,
+};
+use std::{
+    fs::{File, OpenOptions},
+    io::BufWriter,
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::JoinHandle,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Clone, Copy)]
+pub struct Diagnostic {
+    pub sample: GazeSample,
+    pub raw: Option<[f32; 10]>,
+    pub face_found: bool,
+    pub cpu_ms: f64,
+    pub fps: f64,
+    pub received: Instant,
+}
+#[derive(Clone, Copy, PartialEq)]
+pub struct Presentation {
+    pub phase: Phase,
+    pub target: Option<Target>,
+}
+
+struct Recording {
+    writer: TraceWriter<BufWriter<File>>,
+    started: Instant,
+    duration: Duration,
+    presentations: Vec<(Instant, Presentation)>,
+}
+#[derive(Default)]
+pub struct Shared {
+    pub latest: Option<Diagnostic>,
+    pub error: Option<String>,
+    pub saved: Option<PathBuf>,
+    recording: Option<Recording>,
+    recording_path: Option<PathBuf>,
+}
+impl Shared {
+    pub fn is_recording(&self) -> bool {
+        self.recording.is_some()
+    }
+    pub fn start(
+        &mut self,
+        directory: &Path,
+        header: Header,
+        started: Instant,
+    ) -> trace::Result<()> {
+        std::fs::create_dir_all(directory)?;
+        // create_new prevents overwriting a previous test even in the same ms.
+        let path = directory.join(format!(
+            "glance-{}-{}.jsonl",
+            header.started_unix_ms,
+            std::process::id()
+        ));
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        let duration = Duration::from_secs(header.script_seconds);
+        let writer = TraceWriter::new(BufWriter::new(file), header)?;
+        self.recording = Some(Recording {
+            writer,
+            started,
+            duration,
+            presentations: Vec::new(),
+        });
+        self.recording_path = Some(path);
+        self.saved = None;
+        Ok(())
+    }
+    /// Called when a new target is submitted to egui, not recomputed from the
+    /// capture thread's wall clock. Late frames retain the old displayed label.
+    pub fn present(&mut self, at: Instant, presentation: Presentation) {
+        if let Some(recording) = &mut self.recording
+            && recording
+                .presentations
+                .last()
+                .is_none_or(|(_, p)| *p != presentation)
+        {
+            recording.presentations.push((at, presentation));
+        }
+    }
+    pub fn finish(&mut self, reason: EndReason) {
+        if let Some(recording) = self.recording.take() {
+            match recording.writer.finish(reason) {
+                Ok(file) => match file.get_ref().sync_all() {
+                    Ok(()) => self.saved = self.recording_path.take(),
+                    Err(e) => self.error = Some(format!("Trace flush failed: {e}")),
+                },
+                Err(e) => self.error = Some(format!("Trace save failed: {e}")),
+            }
+        }
+    }
+    fn record(&mut self, acquired: Instant, diagnostic: Diagnostic) -> trace::Result<()> {
+        let Some(recording) = &mut self.recording else {
+            return Ok(());
+        };
+        let Some(elapsed) = acquired.checked_duration_since(recording.started) else {
+            return Ok(());
+        };
+        if elapsed >= recording.duration {
+            return Ok(());
+        }
+        let Some((_, shown)) = recording
+            .presentations
+            .iter()
+            .rev()
+            .find(|(at, _)| *at <= acquired)
+        else {
+            return Ok(());
+        };
+        recording.writer.frame(FrameRecord {
+            timestamp_ns: elapsed.as_nanos().try_into()?,
+            source_timestamp_ns: diagnostic.sample.timestamp.as_nanos().try_into()?,
+            features: diagnostic.sample.features.map(|f| f.as_array()),
+            raw_features: diagnostic.raw,
+            face_found: diagnostic.face_found,
+            quality: diagnostic.sample.quality,
+            cpu_ms: diagnostic.cpu_ms,
+            phase: shown.phase,
+            target: shown.target,
+        })
+    }
+}
+
+pub struct Worker {
+    pub shared: Arc<Mutex<Shared>>,
+    stop: Arc<AtomicBool>,
+    handle: JoinHandle<()>,
+}
+impl Worker {
+    pub fn start(index: u32, model_dir: PathBuf, context: eframe::egui::Context) -> Self {
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (state, signal) = (shared.clone(), stop.clone());
+        let handle = std::thread::spawn(move || {
+            if let Err(error) = run(index, model_dir, &state, &signal, &context) {
+                let mut state = state.lock().unwrap();
+                state.finish(EndReason::TrackingError);
+                state.error = Some(format!(
+                    "Camera/tracking stopped: {error}. Close other camera apps, check lighting and reconnect."
+                ));
+            }
+            state.lock().unwrap().finish(EndReason::Cancelled);
+            context.request_repaint();
+        });
+        Self {
+            shared,
+            stop,
+            handle,
+        }
+    }
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+    pub fn finished(&self) -> bool {
+        self.handle.is_finished()
+    }
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+#[derive(Default)]
+struct Raw {
+    found: bool,
+    features: Option<[f32; 10]>,
+}
+struct ObservedLandmarker<L> {
+    inner: L,
+    raw: Arc<Mutex<Raw>>,
+}
+impl<L: Landmarker> Landmarker for ObservedLandmarker<L> {
+    fn locate(&mut self, frame: &Frame) -> lucas_gaze::Result<Option<FaceLandmarks>> {
+        let face = self.inner.locate(frame)?;
+        *self.raw.lock().unwrap() = Raw {
+            found: face.is_some(),
+            features: face
+                .as_ref()
+                .and_then(features::extract)
+                .map(|(f, _)| f.as_array()),
+        };
+        Ok(face)
+    }
+    fn reset(&mut self) {
+        self.inner.reset();
+        *self.raw.lock().unwrap() = Raw::default();
+    }
+}
+fn run(
+    index: u32,
+    models: PathBuf,
+    state: &Mutex<Shared>,
+    stop: &AtomicBool,
+    context: &eframe::egui::Context,
+) -> trace::Result<()> {
+    let camera = NokhwaCamera::open_c270(index)?;
+    // Anchor wall-clock camera origin once to a monotonic instant. Later system
+    // clock adjustments cannot move already presented targets.
+    let now = Instant::now();
+    let wall = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let camera_origin = now
+        .checked_sub(
+            wall.checked_sub(camera.timestamp_epoch())
+                .ok_or("camera epoch is in the future")?,
+        )
+        .ok_or("camera epoch cannot be mapped")?;
+    let raw = Arc::new(Mutex::new(Raw::default()));
+    let landmarker = ObservedLandmarker {
+        inner: MediaPipeLandmarker::new(OrtBackend::new(VerifiedModels::load(&models)?)?),
+        raw: raw.clone(),
+    };
+    let mut source = WebcamGazeSource::new(camera, landmarker)?;
+    let mut recent = std::collections::VecDeque::new();
+    while !stop.load(Ordering::Relaxed) {
+        let cpu = cpu_time::ThreadTime::now();
+        let Some(sample) = source.next_sample()? else {
+            return Err("camera stream ended".into());
+        };
+        let cpu_ms = cpu.elapsed().as_secs_f64() * 1000.0;
+        let acquired = camera_origin
+            .checked_add(sample.timestamp)
+            .ok_or("camera timestamp overflow")?;
+        let received = Instant::now();
+        if acquired > received + Duration::from_millis(100) {
+            return Err("camera timestamp is in the future".into());
+        }
+        recent.push_back(sample.timestamp);
+        while recent.len() > 60 {
+            recent.pop_front();
+        }
+        let span = sample.timestamp - recent[0];
+        let fps = if span.is_zero() {
+            0.0
+        } else {
+            (recent.len() - 1) as f64 / span.as_secs_f64()
+        };
+        let raw = raw.lock().unwrap();
+        let diagnostic = Diagnostic {
+            sample,
+            raw: raw.features,
+            face_found: raw.found,
+            cpu_ms,
+            fps,
+            received,
+        };
+        let mut state = state.lock().unwrap();
+        state.latest = Some(diagnostic);
+        if let Err(e) = state.record(acquired, diagnostic) {
+            // An I/O failure can leave half a JSON line. Do not append an end
+            // record or report that partial file as a successfully saved trace.
+            state.recording = None;
+            state.recording_path = None;
+            state.error = Some(format!(
+                "Recording stopped: {e}. The file may be incomplete. Check free disk space; start a new test."
+            ));
+        }
+        drop(state);
+        context.request_repaint();
+    }
+    Ok(())
+}

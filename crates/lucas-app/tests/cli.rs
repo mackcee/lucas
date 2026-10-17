@@ -28,6 +28,35 @@ fn postgame_missing_database_fails_without_opening_a_window() {
 }
 
 #[test]
+fn help_and_bad_options_never_open_a_camera_or_window() {
+    let help = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(
+        String::from_utf8(help.stdout)
+            .unwrap()
+            .contains("No images")
+    );
+    for args in [
+        vec!["--seconds"],
+        vec!["--seconds", "61"],
+        vec!["--models"],
+        vec!["--unknown"],
+    ] {
+        assert!(
+            !Command::new(env!("CARGO_BIN_EXE_lucas"))
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+}
+
+#[test]
 fn prints_version() {
     let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
         .arg("--version")

@@ -195,6 +195,11 @@ mod windows {
         pub fn open_c270(index: u32) -> Result<Self> {
             Self::open(index, 1280, 720, 30)
         }
+        /// UNIX origin of this camera's sample timestamps. Diagnostics can align
+        /// acquisition (rather than inference completion) with displayed targets.
+        pub fn timestamp_epoch(&self) -> Duration {
+            self.epoch
+        }
         pub fn open(index: u32, width: u32, height: u32, fps: u32) -> Result<Self> {
             Frame::new(width, height)?;
             if fps == 0 || fps > 30 {
