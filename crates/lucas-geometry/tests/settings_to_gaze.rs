@@ -12,7 +12,8 @@ fn edges(rect: Rect) -> [f64; 4] {
 
 #[test]
 fn supplied_settings_drive_map_placement_and_gaze_hits() {
-    let persisted = parse_persisted_settings(include_str!("fixtures/PersistedSettings.json")).unwrap();
+    let persisted =
+        parse_persisted_settings(include_str!("fixtures/PersistedSettings.json")).unwrap();
     let cfg = parse_game_cfg(include_str!("fixtures/game.cfg")).unwrap();
     let partial = parse_persisted_settings(
         r#"{"files":[{"name":"game.cfg","sections":[{"name":"HUD","settings":[{"name":"MinimapScale","value":"0"}]}]}]}"#,
