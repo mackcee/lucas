@@ -2,13 +2,14 @@ use lucas_app::{
     calibration::*,
     script::{Phase, Script, TargetKind},
     settings::MinimapSelection,
+    timer::alignment_store::{AlignmentStore, Key},
     trace::*,
 };
 use lucas_gaze::{
     GazeFeatures, GazeSample,
     calibration::{FitOptions, LabelledSample, fit},
 };
-use lucas_geometry::MinimapSettings;
+use lucas_geometry::{Alignment, MinimapSettings, Rect, minimap_rect};
 use std::time::Duration;
 fn sample(p: [f64; 2], n: u64) -> GazeSample {
     GazeSample {
@@ -32,6 +33,7 @@ fn fitted() -> lucas_gaze::calibration::CalibrationModel {
     let script = CalibrationScript::new(
         [1920, 1080],
         MinimapSettings::default(),
+        &AlignmentStore::default(),
         [531.0, 299.0],
         650.0,
     )
@@ -215,6 +217,7 @@ fn flipped_and_scaled_minimaps_fit_and_revalidate() {
                     minimap_scale,
                     flipped,
                 },
+                &AlignmentStore::default(),
                 [531.0, 299.0],
                 650.0,
             )
@@ -237,6 +240,108 @@ fn flipped_and_scaled_minimaps_fit_and_revalidate() {
             let mut invalid = rows;
             invalid[0].labelled.target = [0.4, 0.4];
             assert!(fit_session(&script, &invalid).is_err());
+        }
+    }
+}
+#[test]
+fn saved_alignment_controls_targets_labels_and_calibration_reuse() {
+    for flipped in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = MinimapSettings {
+            flipped,
+            ..MinimapSettings::default()
+        };
+        let bounds = Rect::new(0.0, 0.0, 1920.0, 1080.0).unwrap();
+        let key = Key::new(bounds, settings);
+        let alignment = Alignment {
+            offset_x_px: if flipped { 12.0 } else { -12.0 },
+            offset_y_px: -10.0,
+            scale_multiplier: 1.25,
+        };
+        let mut alignments = AlignmentStore::default();
+        alignments.set(key, alignment).unwrap();
+        alignments.save(dir.path()).unwrap();
+        let script = CalibrationScript::new(
+            [1920, 1080],
+            settings,
+            &AlignmentStore::load(dir.path()).unwrap(),
+            [531.0, 299.0],
+            650.0,
+        )
+        .unwrap();
+        let map = minimap_rect(bounds, settings, alignment).unwrap();
+        assert_eq!(
+            script.screen().minimap,
+            [
+                map.left() / 1920.0,
+                map.top() / 1080.0,
+                map.right() / 1920.0,
+                map.bottom() / 1080.0,
+            ]
+        );
+        let seed = minimap_rect(bounds, settings, Alignment::default()).unwrap();
+        assert!(map.contains(
+            (seed.left() + seed.right()) / 2.0,
+            seed.top() - 0.04 * 1080.0,
+        ));
+        let above = script.targets()[12].target;
+        assert_eq!(above.kind, TargetKind::Elsewhere);
+        assert!((above.position[1] - (map.top() / 1080.0 - 0.04)).abs() < 1e-9);
+        for target in script.targets() {
+            let [x, y] = target.target.position;
+            assert_eq!(
+                target.target.kind == TargetKind::Minimap,
+                map.contains(x * 1920.0, y * 1080.0)
+            );
+        }
+        let rows: Vec<_> = script
+            .targets()
+            .iter()
+            .flat_map(|t| (0..30).map(move |i| observation(t.target, sample(t.target.position, i))))
+            .collect();
+        let model = fit_session(&script, &rows).unwrap();
+        let store = lucas_store::Store::open_in(dir.path()).unwrap();
+        let screen = lucas_store::ScreenGeometry {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+            scale_factor: 1.0,
+        };
+        save(&store, &model, screen.clone(), 1).unwrap();
+        assert_eq!(
+            load(&store, &screen, script.screen().minimap).unwrap(),
+            Some(model)
+        );
+        for changed in [
+            Alignment {
+                scale_multiplier: 1.0,
+                ..alignment
+            },
+            Alignment {
+                offset_x_px: 0.0,
+                ..alignment
+            },
+            Alignment {
+                offset_y_px: 0.0,
+                ..alignment
+            },
+        ] {
+            alignments.set(key, changed).unwrap();
+            alignments.save(dir.path()).unwrap();
+            let script = CalibrationScript::new(
+                [1920, 1080],
+                settings,
+                &AlignmentStore::load(dir.path()).unwrap(),
+                [531.0, 299.0],
+                650.0,
+            )
+            .unwrap();
+            assert!(
+                load(&store, &screen, script.screen().minimap)
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 }

@@ -1,11 +1,14 @@
 //! Calibration schedule, in-memory observations and the M5.2 revalidation seam.
 //! No camera frames or calibration observations are persisted by this module.
-use crate::script::{Phase, Step, Target, TargetKind};
+use crate::{
+    script::{Phase, Step, Target, TargetKind},
+    timer::alignment_store::{AlignmentStore, Key},
+};
 use lucas_gaze::{
     GazeSample,
     calibration::{self, CalibrationModel, FitOptions, LabelledSample, Screen, Validation},
 };
-use lucas_geometry::{Alignment, MinimapSettings, Rect, minimap_rect};
+use lucas_geometry::{MinimapSettings, Rect, minimap_rect};
 use lucas_store::{Calibration, ScreenGeometry, Store};
 use std::time::Duration;
 
@@ -31,12 +34,13 @@ impl CalibrationScript {
     pub fn new(
         resolution: [u32; 2],
         settings: MinimapSettings,
+        alignments: &AlignmentStore,
         size_mm: [f64; 2],
         distance_mm: f64,
     ) -> calibration::Result<Self> {
         let bounds = Rect::new(0.0, 0.0, resolution[0] as f64, resolution[1] as f64)
             .map_err(|_| calibration::CalibrationError("invalid monitor"))?;
-        let map = minimap_rect(bounds, settings, Alignment::default())
+        let map = minimap_rect(bounds, settings, alignments.get(Key::new(bounds, settings)))
             .map_err(|_| calibration::CalibrationError("cannot locate minimap"))?;
         let screen = Screen {
             resolution,
@@ -321,6 +325,7 @@ mod tests {
                         minimap_scale: scale,
                         flipped,
                     },
+                    &AlignmentStore::default(),
                     [531.0, 299.0],
                     650.0,
                 )

@@ -4,6 +4,7 @@ use lucas_app::{
     calibration::{self, CalibrationScript},
     script::{Phase, Script, Step, validate_duration},
     settings::MinimapSelection,
+    timer::alignment_store::{self, AlignmentStore},
     trace::{CameraInfo, EndReason, FEATURE_NAMES, Header},
 };
 use std::{
@@ -297,9 +298,12 @@ impl DebugApp {
                 scale_factor: scale as f64,
             };
             if self.requested != RunKind::Glance {
+                let folder = alignment_store::data_folder().map_err(|e| e.to_string())?;
+                let alignments = AlignmentStore::load(&folder).map_err(|e| e.to_string())?;
                 let script = CalibrationScript::new(
                     self.monitor.resolution,
                     minimap.settings(),
+                    &alignments,
                     [self.measurements[0], self.measurements[1]],
                     self.measurements[2],
                 )

@@ -168,6 +168,7 @@ pub fn evaluate(
     let screen = CalibrationScript::new(
         calibration.header.monitor_resolution,
         calibration.header.minimap.settings(),
+        &crate::timer::alignment_store::AlignmentStore::default(),
         size_mm,
         distance_mm,
     )?
