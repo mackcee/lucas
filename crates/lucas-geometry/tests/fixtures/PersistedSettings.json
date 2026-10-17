@@ -1,0 +1,19 @@
+{
+  "files": [
+    {
+      "name": "input.ini",
+      "sections": [{"name": "HUD", "settings": [{"name": "MinimapScale", "value": "99"}]}]
+    },
+    {
+      "name": "game.cfg",
+      "sections": [
+        {"name": "General", "settings": [{"name": "Width", "value": "1280"}, {"name": "MinimapScale", "value": "0"}]},
+        {"name": "HUD", "settings": [
+          {"name": "GlobalScale", "value": "0.2"},
+          {"name": "MinimapScale", "value": "1.5000"},
+          {"name": "FlipMiniMap", "value": "1"}
+        ]}
+      ]
+    }
+  ]
+}

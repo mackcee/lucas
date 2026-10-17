@@ -7,3 +7,6 @@ license.workspace = true
 repository.workspace = true
 description = "Pure minimap geometry from window client rect, MinimapScale, flip, and user alignment, plus gaze zone inflation."
 publish = false
+
+[dependencies]
+serde_json = "1.0"
