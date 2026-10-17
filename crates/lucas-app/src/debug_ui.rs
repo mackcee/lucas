@@ -23,6 +23,22 @@ fn trace_directory() -> Result<PathBuf, String> {
 }
 
 pub fn run(seconds: u64, models: PathBuf) -> Result<(), String> {
+    run_impl(seconds, models, None).map(|_| ())
+}
+pub fn run_calibration(models: PathBuf, quick: bool) -> Result<bool, String> {
+    run_impl(
+        600,
+        models,
+        Some(if quick {
+            RunKind::Quick
+        } else {
+            RunKind::Calibrate
+        }),
+    )
+}
+fn run_impl(seconds: u64, models: PathBuf, runtime_kind: Option<RunKind>) -> Result<bool, String> {
+    let passed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let result = passed.clone();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([820.0, 780.0])
@@ -61,12 +77,15 @@ pub fn run(seconds: u64, models: PathBuf) -> Result<(), String> {
                 requested: RunKind::Glance,
                 measurements: [531.0, 299.0, 650.0],
                 calibration_result: None,
+                runtime_kind,
+                runtime_passed: result,
             };
             app.refresh_cameras();
             Ok(Box::new(app))
         }),
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    Ok(passed.load(std::sync::atomic::Ordering::Acquire))
 }
 struct Camera {
     index: u32,
@@ -142,13 +161,16 @@ struct DebugApp {
     requested: RunKind,
     measurements: [f64; 3],
     calibration_result: Option<String>,
+    runtime_kind: Option<RunKind>,
+    runtime_passed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl DebugApp {
     fn refresh_cameras(&mut self) {
         match nokhwa::query(nokhwa::utils::ApiBackend::MediaFoundation) {
             Ok(cameras) => {
                 self.cameras = cameras.into_iter().filter_map(|c| c.index().as_index().ok().map(|index| Camera { index, name: c.human_name() })).collect();
-                self.selected = 0;
+                let preferred = lucas_store::Store::open().and_then(|s| s.load_settings()).map_or(0, |s| s.camera_index);
+                self.selected = self.cameras.iter().position(|c| c.index == preferred).unwrap_or(0);
                 self.error = None;
             }
             Err(_) => self.error = Some("Camera list unavailable. Check Windows camera privacy permissions, then Refresh cameras.".into()),
@@ -184,8 +206,9 @@ impl DebugApp {
                 };
                 let pass = validation.passes(model.target_false_positive_rate());
                 if pass && save {
+                    let store = lucas_store::Store::open()?;
                     calibration::save(
-                        &lucas_store::Store::open()?,
+                        &store,
                         &model,
                         test.screen,
                         SystemTime::now()
@@ -193,6 +216,14 @@ impl DebugApp {
                             .as_millis()
                             .try_into()?,
                     )?;
+                    let mut settings = store.load_settings()?;
+                    settings.camera_index = self.cameras[self.selected].index;
+                    store.save_settings(&settings)?;
+                }
+                if pass && self.runtime_kind.is_some() {
+                    self.runtime_passed
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    context.send_viewport_cmd(ViewportCommand::Close);
                 }
                 Ok(Some(format!(
                     "{} · {:.2}° mean error\nMinimap sensitivity {:.1}% · elsewhere false positives {:.2}% · usable frames {:.0}%\n{}\nDistance is assumed; this short validation is not the G2 recording gate.",
@@ -223,6 +254,11 @@ impl DebugApp {
                     ))
                 }
             }
+        }
+        if self.runtime_kind == Some(RunKind::Quick) {
+            // A failed or cancelled quick check returns to the tray immediately;
+            // it cannot keep retrying stale weights while coaching is enabled.
+            context.send_viewport_cmd(ViewportCommand::Close);
         }
         self.pending = None;
         self.consent = false;
@@ -309,6 +345,12 @@ impl DebugApp {
                 )
                 .map_err(|e| e.to_string())?;
                 let schedule = if self.requested == RunKind::Quick {
+                    let settings = lucas_store::Store::open()
+                        .and_then(|s| s.load_settings())
+                        .map_err(|e| e.to_string())?;
+                    if self.cameras[self.selected].index != settings.camera_index {
+                        return Err("Quick check must use the calibrated camera; select it or run full calibration.".into());
+                    }
                     let model = calibration::load(&lucas_store::Store::open().map_err(|e|e.to_string())?, &screen, script.screen().minimap)
                         .map_err(|e|e.to_string())?.ok_or("No passing calibration for this screen/minimap. Run full calibration first.")?;
                     Schedule::Quick(CalibrationScript::quick(&model), Box::new(model))
@@ -514,8 +556,8 @@ impl DebugApp {
             .and_then(|w| w.shared.lock().unwrap().saved.clone());
         egui::CentralPanel::default().show(root, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.heading("Gaze debug");
-                ui.label("Check camera placement and lighting before recording your glance test.");
+                ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Quick check before play", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
+                ui.label(if self.runtime_kind.is_some() { "Connect your calibrated camera, then start below. Coaching stays paused until validation passes. Close this window to cancel." } else { "Check camera placement and lighting before recording your glance test." });
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(!running && self.pending.is_none(), |ui| {
@@ -553,10 +595,11 @@ impl DebugApp {
                 ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
                 ui.label("Only weights and validation results are saved. Calibration samples stay in memory; the camera never saves images.");
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(fresh && self.pending.is_none(), egui::Button::new("Start calibration")).clicked() { self.arm_test(RunKind::Calibrate); }
-                    if ui.add_enabled(fresh && self.pending.is_none(), egui::Button::new("Quick check · 4 seconds")).clicked() { self.arm_test(RunKind::Quick); }
+                    if ui.add_enabled(fresh && self.pending.is_none() && self.runtime_kind != Some(RunKind::Quick), egui::Button::new("Start calibration")).clicked() { self.arm_test(RunKind::Calibrate); }
+                    if ui.add_enabled(fresh && self.pending.is_none() && self.runtime_kind != Some(RunKind::Calibrate), egui::Button::new("Quick check · 4 seconds")).clicked() { self.arm_test(RunKind::Quick); }
                 });
                 if let Some(result) = &self.calibration_result { ui.add_space(8.0); ui.label(result); }
+                if self.runtime_kind.is_some() { return; }
                 ui.add_space(16.0); ui.separator();
                 ui.heading("Glance test");
                 ui.label("Follow each dot with your eyes; keep your head comfortable and mostly still. Look at the countdown between dots. The main monitor will fill the screen. Esc saves a partial test.");

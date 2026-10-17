@@ -1,4 +1,4 @@
-//! Thin dispatcher; camera and recording both require a UI action.
+//! Tray gaze coaching by default; numeric trace recording remains opt-in.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
@@ -10,12 +10,12 @@ mod debug_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
-const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() || matches!(args.as_slice(), [flag] if flag == "--timer") {
-        start_timer();
+        start_tray(!args.is_empty());
         return ExitCode::SUCCESS;
     }
     #[cfg(windows)]
@@ -49,6 +49,7 @@ fn run() -> Result<(), String> {
         .ok_or("cannot locate executable directory")?
         .join("models");
     let mut check_runtime = false;
+    let mut runtime_calibration = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -69,6 +70,15 @@ fn run() -> Result<(), String> {
             }
             "--models" => models = PathBuf::from(args.next().ok_or("--models needs a directory")?),
             "--check-runtime" => check_runtime = true,
+            "--runtime-calibrate" => runtime_calibration = Some(false),
+            "--runtime-quick" => runtime_calibration = Some(true),
+            "--runtime-postgame" => {
+                let id = args.next().ok_or("missing game ID")?;
+                let store = lucas_store::Store::open().map_err(|e| e.to_string())?;
+                let card = lucas_app::postgame::PostGameCard::from_store(store, &id)
+                    .map_err(|e| e.to_string())?;
+                return lucas_app::postgame::show_postgame(card).map_err(|e| e.to_string());
+            }
             // Opens the shared diagnostics/calibration surface, never a camera
             // or recording until the player explicitly starts it.
             "--calibrate" => {}
@@ -81,6 +91,13 @@ fn run() -> Result<(), String> {
     lucas_app::script::validate_duration(seconds).map_err(str::to_owned)?;
     #[cfg(windows)]
     {
+        if let Some(quick) = runtime_calibration {
+            return if debug_ui::run_calibration(models, quick)? {
+                Ok(())
+            } else {
+                Err("Calibration cancelled or failed; coaching remains paused".into())
+            };
+        }
         if check_runtime {
             let verified =
                 lucas_gaze::models::VerifiedModels::load(&models).map_err(|e| e.to_string())?;
@@ -92,14 +109,18 @@ fn run() -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let _ = (seconds, models, check_runtime);
+        let _ = (seconds, models, check_runtime, runtime_calibration);
         Err("the gaze debug window requires Windows; use cargo xtask replay <trace> here".into())
     }
 }
 
 #[cfg(windows)]
-fn start_timer() {
-    if let Err(error) = lucas_app::timer::run() {
+fn start_tray(timer: bool) {
+    if let Err(error) = if timer {
+        lucas_app::timer::run_timer()
+    } else {
+        lucas_app::timer::run()
+    } {
         // A failed tray startup cannot report through a tray that never opened.
         // Error-only dialog; normal launch and every overlay path never activate.
         use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
@@ -120,7 +141,7 @@ fn start_timer() {
 }
 
 #[cfg(not(windows))]
-fn start_timer() {
-    eprintln!("LUCAS timer mode requires Windows 10/11. Use --version for build information.");
+fn start_tray(_: bool) {
+    eprintln!("LUCAS tray coaching requires Windows 10/11. Use --version for build information.");
     std::process::exit(1);
 }

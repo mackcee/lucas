@@ -27,14 +27,16 @@ alive/game gating (with explicit window-only fallback), minimap alignment and
 numeric geometry reports. See the [G1 Windows checklist](docs/testing-on-windows.md#g1--timer-mode-and-minimap-alignment-about-15-minutes).
 **M6.1 adds local persistence in [`lucas-store`](crates/lucas-store/README.md) and a
 standalone [post-game summary card](crates/lucas-app/README.md)**. Without arguments,
-`lucas` starts timer mode on Windows; the viewer below opens synthetic or saved
-summaries. Timer mode does not open a camera. Gaze-driven coaching, calibration
-and per-game storage are not wired into it yet, so games are not automatically
-recorded and the card does not open at game end.
+`lucas` now starts **gaze coaching on Windows (M5.2)**. Complete calibration and
+the tray's four-second quick check at each game start; unknown/off-screen gaze
+pauses coaching. Summaries are stored locally and the card opens at game end.
+See the [runtime guide](crates/lucas-app/src/runtime/README.md) for eligibility,
+camera lifetime and clock mapping. `--timer` remains an explicit no-camera option;
+the viewer below opens synthetic or saved summaries.
 
 **M4.2 adds a Windows gaze debug window and opt-in numeric glance-test recorder**
 to `lucas`; follow the [Windows testing guide](docs/testing-on-windows.md) to
-download a ready-to-run CI build. Camera access requires clicking Connect camera;
+download a ready-to-run CI build. Diagnostic camera access requires clicking Connect camera;
 recording requires a separate opt-in. Diagnostics use `lucas-game` to locate
 minimap settings and make no network requests.
 
@@ -122,7 +124,7 @@ metric interpretation and integration.
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
-| `lucas-app` | Windows timer tray, alignment, numeric reports, post-game card, calibration, gaze debug UI and opt-in traces |
+| `lucas-app` | Windows gaze-coaching tray, explicit timer fallback, alignment, per-game storage/card, calibration, gaze debug UI and opt-in traces |
 | `xtask` | Synthetic-player simulator, trace replay and G2 evaluation, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described

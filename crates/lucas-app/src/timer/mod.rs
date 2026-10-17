@@ -1,4 +1,4 @@
-//! Timer-mode orchestration. No gaze or per-game storage is involved.
+//! Shared tray/geometry host with gaze coaching and an explicit timer fallback.
 pub mod alignment;
 pub mod alignment_store;
 #[cfg(windows)]
@@ -9,4 +9,4 @@ pub mod report;
 pub mod scheduling;
 pub mod settings;
 #[cfg(windows)]
-pub use native::run;
+pub use native::{run, run_timer};

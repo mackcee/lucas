@@ -1,7 +1,8 @@
 # Post-game summary window
 
-This chunk adds `lucas_app::postgame`, independent of the tray, camera debug
-window, and future game loop. It never opens automatically during play.
+`lucas_app::postgame` remains usable independently of the tray and gaze debug
+window. The [gaze runtime](src/runtime/README.md) now opens it after game end,
+never as an in-game score.
 
 See the root README's [viewer commands](../../README.md#preview-the-post-game-card)
 for synthetic and saved-game previews.
@@ -21,9 +22,9 @@ lucas_app::postgame::show_postgame(card)?;
 ```
 
 `show_postgame` starts an eframe event loop and belongs on the main/UI thread.
-An already-running UI should embed `PostGameCard::show(ui)` instead. Game-end
-routing, suppressing the card during play, and pause-aware event clock mapping
-remain the later loop's responsibility. Follow the storage reference's
+An already-running UI should embed `PostGameCard::show(ui)` instead. The tray
+runtime hosts the card in a subprocess and owns game-end routing, in-game
+suppression and pause-aware event clock mapping. Follow the storage reference's
 [deletion prerequisites](../lucas-store/README.md#privacy-controls) first:
 ownership transfers into the card so **Delete all data** can close SQLite before
 deleting files. Deletion requires a second,
@@ -66,10 +67,9 @@ M4.2 provides the Windows `lucas` debug window and an opt-in fullscreen glance
 recorder. The library contains portable script, trace-format and replay-summary
 logic; it does not start a camera or touch disk merely by being linked. See
 [Windows testing](../../docs/testing-on-windows.md) for the tester checklist.
-M5.1 adds calibration/classification, described below. The separate timer
-tray starts with no arguments or `--timer`; use `lucas --calibrate` or
-`lucas --seconds 600` for the shared gaze window. Timer pulses are not driven by
-gaze; live-loop integration remains separate.
+Calibration/classification is described below. The tray starts gaze coaching
+with no arguments; `--timer` is the explicit no-gaze option. Use `lucas --calibrate`
+or `lucas --seconds 600` for the standalone shared gaze window.
 
 ## Data boundary
 
@@ -198,8 +198,8 @@ refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
    `validation.passes(model.target_false_positive_rate())` before enabling gaze.
 4. Feed the camera stream to `lucas_gaze::decision::CalibratedDetector`.
 
-The caller owns game-start routing, unknown handling in play, and disabling gaze
-when revalidation fails. Those are not connected to the pulse loop in this chunk.
+`runtime` now owns game-start routing, unknown handling in play and disabling
+gaze when revalidation fails, using these unchanged calibration seams.
 
 ## Windows bundle
 

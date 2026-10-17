@@ -7,15 +7,14 @@ use super::{
     scheduling::{GateMode, Inputs, Status, Timer},
     settings::read_hud,
 };
-use lucas_game::{
-    GameState, LiveClient, LiveDataSource, SettingsLocator, Win32WindowProbe, WindowProbe,
-};
+use lucas_game::{LiveClient, LiveDataSource, SettingsLocator, Win32WindowProbe, WindowProbe};
 use lucas_geometry::{Rect, minimap_rect};
 use lucas_overlay::{
     Overlay, OverlayError, Pulse,
     win32::{Options, TargetWindow, Win32Overlay},
 };
 use std::{
+    collections::VecDeque,
     error::Error,
     io,
     path::PathBuf,
@@ -33,13 +32,20 @@ use tray_icon::{
 };
 use windows_sys::Win32::{
     Foundation::*,
-    System::Threading::CreateMutexW,
+    Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint},
+    System::{Diagnostics::Debug::MessageBeep, Threading::CreateMutexW},
     UI::{HiDpi::*, WindowsAndMessaging::*},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 pub fn run() -> Result<()> {
+    run_mode(false)
+}
+pub fn run_timer() -> Result<()> {
+    run_mode(true)
+}
+fn run_mode(mut timer_mode: bool) -> Result<()> {
     let Some(_instance) = SingleInstance::acquire()? else {
         return Ok(());
     };
@@ -57,7 +63,12 @@ pub fn run() -> Result<()> {
         SettingsLocator::windows_defaults(std::env::var_os("LUCAS_LEAGUE_ROOT").map(PathBuf::from));
     let origin = Instant::now();
     let worker = ApiWorker::start(origin)?;
+    let mut gaze = crate::runtime::desktop::Desktop::new(origin)?;
     let mut timer = Timer::default();
+    if !gaze.runtime.settings().live_client_gate {
+        timer.set_mode(GateMode::WindowOnly);
+        worker.set_enabled(false);
+    }
     let mut probe = Win32WindowProbe;
     let mut hud = None;
     let mut settings_due = Duration::ZERO;
@@ -67,11 +78,22 @@ pub fn run() -> Result<()> {
     let mut last_rect = None;
 
     let status_item = MenuItem::new("Waiting for a game", false, None);
-    let notice_item = MenuItem::new("Timer mode: amber ripple every 10 seconds", false, None);
+    let notice_item = MenuItem::new(
+        "Gaze mode: complete a quick check from the tray each game",
+        false,
+        None,
+    );
+    let timer_option = CheckMenuItem::new("Timer mode (no gaze)", true, timer_mode, None);
+    let calibrate = MenuItem::new("Calibrate gaze...", true, None);
     let pause = MenuItem::new("Pause pulses", true, None);
     let align = MenuItem::new("Align minimap...", false, None);
     let report = MenuItem::new("Save minimap numbers", false, None);
-    let live_gate = CheckMenuItem::new("Use Live Client gate (recommended)", true, true, None);
+    let live_gate = CheckMenuItem::new(
+        "Use Live Client gate (recommended)",
+        true,
+        gaze.runtime.settings().live_client_gate,
+        None,
+    );
     let open = MenuItem::new("Open data folder", true, None);
     let quit = MenuItem::new("Quit", true, None);
     let menu = Menu::with_items(&[
@@ -79,6 +101,8 @@ pub fn run() -> Result<()> {
         &notice_item,
         &PredefinedMenuItem::separator(),
         &pause,
+        &timer_option,
+        &calibrate,
         &align,
         &report,
         &live_gate,
@@ -94,6 +118,26 @@ pub fn run() -> Result<()> {
     let mut last_status = String::new();
     let mut quit_requested = false;
     let mut last_tick = origin.elapsed();
+    // Compare the calibration display even before a game window exists, so a
+    // changed monitor/DPI/alignment routes startup back to calibration.
+    if let Some(screen) = primary_screen() {
+        let client = Rect::new(
+            screen.left as f64,
+            screen.top as f64,
+            screen.left as f64 + screen.width as f64,
+            screen.top as f64 + screen.height as f64,
+        )?;
+        let settings = read_hud(&locator).unwrap_or_default();
+        let rect = minimap_rect(client, settings, store.get(Key::new(client, settings)))?;
+        gaze.geometry(screen, rect)?;
+    }
+    // Never steal game focus: quick checks and mid-game recalibration are tray actions.
+    if !timer_mode
+        && !probe.sample().unwrap_or_default().exists
+        && gaze.runtime.calibration() == crate::runtime::CalibrationState::Needed
+    {
+        gaze.launch_calibration()?;
+    }
 
     while !quit_requested {
         let mut keys = Vec::new();
@@ -156,7 +200,12 @@ pub fn run() -> Result<()> {
             timer.reset();
             last_key = key;
         }
-        let game = worker.eligibility(origin);
+        for (at, snapshot) in worker.drain() {
+            gaze.poll(at, snapshot.as_ref())?;
+        }
+        // Drained polls may have completed after the earlier window sample.
+        let now = origin.elapsed();
+        let game = gaze.runtime.eligibility(now);
         let game_allowed = timer.mode() == GateMode::WindowOnly || game.eligible();
         align.set_enabled(context.is_some() && window.exists && game_allowed);
         report.set_enabled(context.is_some() && window.exists && alignment.is_none());
@@ -164,6 +213,18 @@ pub fn run() -> Result<()> {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == *quit.id() {
                 quit_requested = true;
+            } else if event.id == *timer_option.id() {
+                timer_mode = timer_option.is_checked();
+                timer.reset();
+                notice_item.set_text(if timer_mode {
+                    "Timer mode: no gaze; fixed 10-second reminders"
+                } else {
+                    "Gaze mode: quick check required each game"
+                });
+            } else if event.id == *calibrate.id() {
+                if let Err(error) = gaze.launch_calibration() {
+                    notice_item.set_text(format!("Calibration unavailable: {error}"));
+                }
             } else if event.id == *pause.id() {
                 timer.set_paused(!timer.paused());
                 alignment = None;
@@ -172,7 +233,7 @@ pub fn run() -> Result<()> {
                 } else {
                     "Pause pulses"
                 });
-                notice_item.set_text("Timer mode: amber ripple every 10 seconds");
+                notice_item.set_text("Pulse pause changed");
             } else if event.id == *live_gate.id() {
                 let mode = if live_gate.is_checked() {
                     GateMode::LiveClient
@@ -181,6 +242,12 @@ pub fn run() -> Result<()> {
                 };
                 timer.set_mode(mode);
                 worker.set_enabled(mode == GateMode::LiveClient);
+                gaze.runtime.set_live_gate(
+                    mode == GateMode::LiveClient,
+                    now,
+                    crate::runtime::desktop::unix_ms(),
+                )?;
+                lucas_store::Store::open()?.save_settings(gaze.runtime.settings())?;
                 alignment = None;
                 notice_item.set_text(if mode == GateMode::WindowOnly {
                     "Window-only: pulses also run while dead/loading; pause manually"
@@ -233,7 +300,7 @@ pub fn run() -> Result<()> {
             }
         }
         // Re-evaluate after menu mode changes. API stale state is cleared there.
-        let game = worker.eligibility(origin);
+        let game = gaze.runtime.eligibility(now);
         let game_allowed = timer.mode() == GateMode::WindowOnly || game.eligible();
         let alignment_visible = window.overlay_eligible() && game_allowed;
         for action in keys {
@@ -318,6 +385,38 @@ pub fn run() -> Result<()> {
                 last_rect = Some(rect);
             }
         }
+        if let (Some((client, _)), Some(rect)) = (context, rect) {
+            // A changed window size, DPI, origin or aligned map rejects the fit.
+            let dpi = unsafe { GetDpiForWindow(target) };
+            if dpi > 0 {
+                gaze.geometry(
+                    lucas_store::ScreenGeometry {
+                        left: client.left() as i32,
+                        top: client.top() as i32,
+                        width: client.width() as u32,
+                        height: client.height() as u32,
+                        scale_factor: dpi as f64 / 96.0,
+                    },
+                    rect,
+                )?;
+            }
+        }
+        let gaze_tick = gaze.tick(
+            now,
+            crate::runtime::Inputs {
+                window_exists: window.exists,
+                foreground: window.overlay_eligible(),
+                geometry_ready,
+                gaze_mode: !timer_mode,
+                paused: timer.paused() || alignment.is_some(),
+            },
+        )?;
+        calibrate.set_text(match gaze.runtime.calibration() {
+            crate::runtime::CalibrationState::Needed => "Calibration needed / recalibrate...",
+            crate::runtime::CalibrationState::QuickCheck => "Quick check required (4 seconds)...",
+            crate::runtime::CalibrationState::Ready => "Recalibrate gaze...",
+        });
+        calibrate.set_enabled(!gaze.calibrating());
         let decision = timer.tick(
             now,
             Inputs {
@@ -328,10 +427,49 @@ pub fn run() -> Result<()> {
             },
         );
         if let Some((_, native)) = overlay.as_mut() {
-            let result = if decision.hide {
+            let result = if if timer_mode {
+                decision.hide
+            } else {
+                gaze_tick.hide
+            } {
                 native.hide()
-            } else if decision.pulse {
-                native.show_pulse(Pulse::default())
+            } else if if timer_mode {
+                decision.pulse
+            } else {
+                gaze_tick.pulse.is_some()
+            } {
+                let mut pulse = Pulse::default();
+                if timer_mode {
+                    gaze.runtime.timer_pulse(now)?;
+                }
+                if !timer_mode {
+                    let settings = &gaze.runtime.settings().pulse;
+                    pulse.salience = gaze_tick.pulse.unwrap().salience;
+                    pulse.colour = lucas_overlay::Colour(
+                        settings.colour_rgb[0],
+                        settings.colour_rgb[1],
+                        settings.colour_rgb[2],
+                    );
+                    pulse.style = match settings.style {
+                        lucas_store::PulseStyle::Ripple => lucas_overlay::PulseStyle::Ripple,
+                        lucas_store::PulseStyle::BreathingBorder => {
+                            lucas_overlay::PulseStyle::BreathingBorder
+                        }
+                        lucas_store::PulseStyle::CornerBrackets => {
+                            lucas_overlay::PulseStyle::CornerBrackets
+                        }
+                        lucas_store::PulseStyle::CometSweep => {
+                            lucas_overlay::PulseStyle::CometSweep
+                        }
+                    };
+                }
+                let shown = native.show_pulse(pulse);
+                if shown.is_ok() && !timer_mode && gaze.runtime.settings().pulse.sound {
+                    unsafe {
+                        MessageBeep(MB_OK);
+                    }
+                }
+                shown
             } else {
                 native.reassert_topmost()
             };
@@ -351,6 +489,21 @@ pub fn run() -> Result<()> {
             "Waiting — HUD settings unavailable; set LUCAS_LEAGUE_ROOT"
         } else if window.display_mode == lucas_game::DisplayMode::ExclusiveFullscreen {
             "Waiting — switch League to Borderless"
+        } else if !timer_mode {
+            match gaze_tick.status {
+                crate::runtime::Status::Waiting => "Waiting for a game",
+                crate::runtime::Status::CalibrationNeeded => {
+                    "Calibration needed — choose Calibrate gaze"
+                }
+                crate::runtime::Status::QuickCheckNeeded => {
+                    "Quick check needed — open it from the tray before play"
+                }
+                crate::runtime::Status::TrackingLost => "No face / tracking lost — pulses paused",
+                crate::runtime::Status::Paused => {
+                    "Paused — waiting for eligible play / League foreground"
+                }
+                crate::runtime::Status::Active => "Active — gaze coaching",
+            }
         } else {
             match decision.status {
                 Status::Active => "Active — timer every 10 seconds",
@@ -365,17 +518,43 @@ pub fn run() -> Result<()> {
         }
         // Sleeping is bounded; overlay has its own 16 ms foreground gate. The
         // preview additionally checks that same gate in its WM_TIMER handler.
-        thread::sleep(Duration::from_millis(25));
+        thread::sleep(Duration::from_millis(33));
     }
     drop(alignment);
     if let Some((_, mut overlay)) = overlay {
         overlay.shutdown()?;
     }
+    drop(gaze);
     drop(worker);
     drop(tray);
     Ok(())
 }
 
+fn primary_screen() -> Option<lucas_store::ScreenGeometry> {
+    // SAFETY: output pointers reference initialized stack values. This queries
+    // only monitor geometry/DPI, never game pixels or process memory.
+    unsafe {
+        let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        let (mut x, mut y) = (0, 0);
+        if GetMonitorInfoW(monitor, &mut info) == 0
+            || GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y) < 0
+            || x == 0
+        {
+            return None;
+        }
+        Some(lucas_store::ScreenGeometry {
+            left: info.rcMonitor.left,
+            top: info.rcMonitor.top,
+            width: (info.rcMonitor.right - info.rcMonitor.left) as u32,
+            height: (info.rcMonitor.bottom - info.rcMonitor.top) as u32,
+            scale_factor: x as f64 / 96.0,
+        })
+    }
+}
 pub(super) fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
@@ -428,15 +607,16 @@ fn icon() -> Result<Icon> {
     Ok(Icon::from_rgba(pixels, 32, 32)?)
 }
 
+type Poll = (Duration, Option<lucas_game::Snapshot>);
 struct ApiWorker {
-    state: Arc<Mutex<GameState>>,
+    state: Arc<Mutex<VecDeque<Poll>>>,
     generation: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
 impl ApiWorker {
     fn start(origin: Instant) -> io::Result<Self> {
-        let state = Arc::new(Mutex::new(GameState::new()));
+        let state = Arc::new(Mutex::new(VecDeque::new()));
         let generation = Arc::new(AtomicU64::new(1)); // low bit: enabled
         let stop = Arc::new(AtomicBool::new(false));
         let (s, g, stopped) = (
@@ -462,13 +642,11 @@ impl ApiWorker {
                         if let Ok(mut state) = s.lock()
                             && g.load(Ordering::Acquire) == token
                         {
-                            let success = match result {
-                                Some(Ok(snapshot)) => state.update(completed, &snapshot).is_ok(),
-                                _ => false,
-                            };
-                            if !success {
-                                let _ = state.unavailable(completed);
+                            // The cumulative event log rediscovers deaths after a tray stall.
+                            if state.len() == 8 {
+                                state.pop_front();
                             }
+                            state.push_back((completed, result.and_then(std::result::Result::ok)));
                         }
                     }
                     thread::sleep(Duration::from_millis(50));
@@ -481,12 +659,10 @@ impl ApiWorker {
             handle: Some(handle),
         })
     }
-    fn eligibility(&self, origin: Instant) -> lucas_game::Eligibility {
+    fn drain(&self) -> Vec<Poll> {
         self.state
             .lock()
-            // Sample while holding the lock: the worker cannot install a poll
-            // timestamp later than this freshness check's clock sample.
-            .map(|s| s.eligibility(origin.elapsed()))
+            .map(|mut s| s.drain(..).collect())
             .unwrap_or_default()
     }
     fn set_enabled(&self, enabled: bool) {
@@ -494,7 +670,7 @@ impl ApiWorker {
         self.generation
             .store(((old / 2 + 1) * 2) | u64::from(enabled), Ordering::Release);
         if let Ok(mut state) = self.state.lock() {
-            state.reset();
+            state.clear();
         }
     }
 }
