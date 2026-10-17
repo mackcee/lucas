@@ -18,9 +18,10 @@ locator are Windows-specific.
   map 11, verified `CLASSIC` mode, resolved living player, and no inferred pause.
   Evaluate it every core tick. The adapter to lucas-core's types belongs in the
   app; this crate deliberately does not couple to that parallel implementation.
-- Combine that gate with `WindowProbe::sample()?.overlay_eligible()` and face/gaze
-  validity. Window-only fallback is an **explicit app policy**, never enabled by
-  an HTTP/TLS failure inside this library. It cannot infer deaths, map or loading.
+- Combine that gate with `WindowProbe::sample()?.overlay_eligible()` and, for
+  gaze-driven coaching, face/gaze validity. Window-only fallback is an **explicit
+  app policy**, never enabled by an HTTP/TLS failure inside this library. It cannot
+  infer deaths, map or loading.
 - A stall **>2 s** infers a pause; a successful snapshot **>=3 s** old is stale.
   `game_time_at` interpolates recent poll pairs, clamps just after the latest
   sample instead of advancing with wall time, and refuses outage gaps. Precision
@@ -49,10 +50,11 @@ root, the Riot install manifest, and standard Windows paths. Manifest
 game.cfg for each root. Pass `SettingsFile::read()` text to lucas-geometry's existing
 `parse_persisted_settings` or `parse_game_cfg` API according to `SettingsFormat`.
 See the [settings parsing contract](../lucas-geometry/README.md#reading-settings)
-for `SettingsPatch`, per-field fallback, defaults, and parse-error handling. Only
-the application adapter connecting discovery to parsing remains unimplemented.
-It should fall through on read or parse errors; this crate only discovers and
-reads files, not HUD values.
+for `SettingsPatch`, per-field fallback, defaults, and parse-error handling.
+This crate only discovers and reads files, not HUD values. The timer app connects
+discovery to parsing in [`read_hud`](../lucas-app/src/timer/settings.rs); see the
+[Windows checklist](../../docs/testing-on-windows.md#start-and-gate-checks) for
+runtime settings discovery and troubleshooting.
 
 The Win32 probe uses only window/monitor metadata and shell notification state:
 `FindWindowW(RiotWindowClass)`, foreground and geometry checks, and
