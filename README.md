@@ -65,16 +65,12 @@ access to fetch the advisory database.
 | `lucas-overlay` | Overlay interface, future Win32 layered overlay, recording implementation |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
 | `lucas-app` | `lucas` binary, future tray application and UI |
-| `xtask` | Development commands for simulation, replay, and model conversion |
+| `xtask` | Development tooling scaffold |
 
 These are responsibility boundaries, not implemented features. No third-party
 Rust dependencies or model files are included yet. The gaze pipeline will use
 MediaPipe models through ONNX Runtime behind a `GazeSource` trait; see
 [`models/README.md`](models/README.md).
-
-Run `cargo xtask --help` for the development command scaffold. `sim`, `replay`, and
-`model-conversion` currently report that they are unimplemented and exit with a
-nonzero status.
 
 ## License
 
