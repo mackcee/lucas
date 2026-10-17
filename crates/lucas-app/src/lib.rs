@@ -3,4 +3,6 @@
 
 #[forbid(unsafe_code)]
 pub mod postgame;
+#[forbid(unsafe_code)]
+pub mod settings;
 pub mod timer;

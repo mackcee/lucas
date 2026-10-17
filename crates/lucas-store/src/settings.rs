@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 pub enum PulseStyle {
     #[default]
     Ripple,
-    Ring,
-    Glow,
+    BreathingBorder,
+    CornerBrackets,
+    CometSweep,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

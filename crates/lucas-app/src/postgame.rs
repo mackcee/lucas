@@ -52,6 +52,29 @@ impl PostGameCard {
         }
     }
 
+    fn delete_data(&mut self) {
+        let Some(directory) = &self.data_folder else {
+            return;
+        };
+        let result = self
+            .store
+            .take()
+            .map_or_else(|| Store::open_in(directory), Ok)
+            .and_then(Store::delete_all_data);
+        match result {
+            Ok(()) => {
+                self.summary = None;
+                self.probes.clear();
+                self.notice = None;
+            }
+            Err(error) => {
+                self.notice = Some(format!(
+                    "Deletion was incomplete: {error}. Close other LUCAS windows, then choose Delete all data again to retry."
+                ));
+            }
+        }
+    }
+
     /// The sole presentation function: no game API, camera access, or live score.
     pub fn show(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -76,7 +99,7 @@ impl PostGameCard {
                 {
                     self.notice = Some(format!("Could not open the folder: {error}. You can copy the path below."));
                 }
-                if ui.add_enabled(self.store.is_some(), egui::Button::new("Delete all data…")).clicked() {
+                if ui.add_enabled(self.data_folder.is_some(), egui::Button::new("Delete all data…")).clicked() {
                     self.confirm_delete = true;
                 }
             });
@@ -93,18 +116,7 @@ impl PostGameCard {
                     if ui.button("Cancel").clicked() { self.confirm_delete = false; }
                     if ui.button("Permanently delete all data").clicked() {
                         self.confirm_delete = false;
-                        if let Some(store) = self.store.take() {
-                            match store.delete_all_data() {
-                                Ok(()) => {
-                                    self.summary = None;
-                                    self.probes.clear();
-                                    self.notice = None;
-                                }
-                                Err(error) => {
-                                    self.notice = Some(format!("Deletion was incomplete: {error}. Close other LUCAS windows and reopen this data folder to retry."));
-                                }
-                            }
-                        }
+                        self.delete_data();
                     }
                 });
             }
@@ -211,7 +223,7 @@ fn render_summary(ui: &mut egui::Ui, summary: &GameSummary, probes: &[ProbePoint
                 let (name, colour) = death_style(classification);
                 let gap = seconds_blind.map_or_else(
                     || "No earlier minimap evidence".into(),
-                    |seconds| format!("{seconds:.1} s since minimap evidence"),
+                    |seconds| format!("{seconds:.1} s elapsed gap"),
                 );
                 let uncertain = if classification == DeathClassification::Unknown {
                     " (uncertain)"
@@ -237,7 +249,6 @@ fn render_summary(ui: &mut egui::Ui, summary: &GameSummary, probes: &[ProbePoint
                         summary,
                         index,
                         event.game_time_ms,
-                        seconds_blind,
                         colour,
                     );
                 });
@@ -299,7 +310,6 @@ fn death_timeline(
     summary: &GameSummary,
     index: usize,
     death_ms: u64,
-    gap: Option<f64>,
     colour: Color32,
 ) {
     let window = 20.0_f64
@@ -329,18 +339,8 @@ fn death_timeline(
         .include_x(0.0)
         .include_y(0.0)
         .include_y(1.0)
-        .x_axis_label("Seconds before death · circles = checks · diamonds = pulses")
+        .x_axis_label("Game seconds · circles = checks · diamonds = pulses")
         .show(ui, |plot| {
-            if let Some(gap) = gap {
-                plot.line(
-                    Line::new(
-                        "Gap since minimap evidence",
-                        vec![[-gap.min(window), 0.9], [0.0, 0.9]],
-                    )
-                    .color(colour)
-                    .width(3.0_f32),
-                );
-            }
             plot.points(Points::new("Check", checks).color(SEEN).radius(4.0_f32));
             plot.points(
                 Points::new("Pulse", pulses)
@@ -529,6 +529,9 @@ pub fn run_dev(source: &std::ffi::OsStr) -> Result<(), Box<dyn std::error::Error
     };
     show_postgame(card).map_err(|error| error.to_string().into())
 }
+
+#[cfg(test)]
+mod tests;
 
 mod demo;
 use demo::demo_probes;

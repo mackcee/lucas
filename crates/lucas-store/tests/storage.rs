@@ -78,7 +78,7 @@ fn settings_defaults_roundtrip_and_missing_nested_fields() {
         ..Settings::default()
     };
     settings.pulse.sound = true;
-    settings.pulse.style = PulseStyle::Glow;
+    settings.pulse.style = PulseStyle::BreathingBorder;
     store.save_settings(&settings).unwrap();
     assert_eq!(store.load_settings().unwrap(), settings);
     store.save_settings(&Settings::default()).unwrap(); // atomic replacement also on Windows
@@ -99,6 +99,36 @@ fn settings_defaults_roundtrip_and_missing_nested_fields() {
     ));
     std::fs::write(dir.path().join("settings.toml"), "pulse = [").unwrap();
     assert!(store.load_settings().is_err());
+}
+
+#[test]
+fn pulse_styles_roundtrip_using_the_renderer_vocabulary() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_in(dir.path()).unwrap();
+    for (style, name) in [
+        (PulseStyle::Ripple, "ripple"),
+        (PulseStyle::BreathingBorder, "breathing_border"),
+        (PulseStyle::CornerBrackets, "corner_brackets"),
+        (PulseStyle::CometSweep, "comet_sweep"),
+    ] {
+        let mut settings = Settings::default();
+        settings.pulse.style = style;
+        store.save_settings(&settings).unwrap();
+        let persisted: toml::Value = toml::from_str(
+            &std::fs::read_to_string(dir.path().join("settings.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(persisted["pulse"]["style"].as_str(), Some(name));
+        assert_eq!(store.load_settings().unwrap().pulse.style, style);
+    }
+    for unsupported in ["ring", "glow"] {
+        std::fs::write(
+            dir.path().join("settings.toml"),
+            format!("[pulse]\nstyle = \"{unsupported}\"\n"),
+        )
+        .unwrap();
+        assert!(store.load_settings().is_err());
+    }
 }
 
 #[test]
