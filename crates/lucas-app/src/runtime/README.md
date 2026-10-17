@@ -2,9 +2,9 @@
 
 `lucas` starts gaze coaching in the Windows notification area. `--timer` (or
 **Timer mode (no gaze)** in the tray) explicitly selects the fixed ten-second
-fallback. The stored training level, density cap, pulse style/colour and optional
-sound drive gaze coaching. The tray's **Training level (next game)** submenu and
-**Settings…** select levels manually; automatic promotion remains out of scope.
+fallback. The stored training level and density cap drive gaze coaching;
+pulse appearance and optional sound apply in both modes. For the user controls,
+see [Getting started](../../../../README.md#getting-started).
 
 ## Before play
 
@@ -13,10 +13,13 @@ sound drive gaze coaching. The tray's **Training level (next game)** submenu and
   calibration UI, next-game alignment instructions, and starting level.
   **First-run setup…** reopens it with current settings. Close discards the in-memory
   draft; only Finish commits settings, calibration and the completion flag. Draft
-  camera choices/weights cannot replace the live pair before Finish; a failed save
-  remains retryable while the window is open. Ordinary settings saves do not
-  complete setup. Explicit `--timer` or the tray's timer mode bypasses setup for
-  no-camera diagnostics, but an open settings/setup window still pauses coaching.
+  camera choices/weights cannot replace the live pair before Finish. Finish is not
+  a multi-file transaction: it removes the old calibration, saves settings with
+  completion false, saves the new calibration, then marks completion true. A failed
+  Finish can leave partial disk changes; retry while the draft window is open.
+  Ordinary settings saves do not complete setup. Explicit `--timer` or the tray's
+  timer mode bypasses setup for no-camera diagnostics, but an open settings/setup
+  window still pauses coaching.
   Switching to gaze invokes setup when required.
 - With completed setup but no passing calibration, launch opens calibration
   **only if League is not running**. Connect the camera and run full calibration.
@@ -60,8 +63,9 @@ sound drive gaze coaching. The tray's **Training level (next game)** submenu and
   and calibration share the debug capture code but have no trace-recording UI.
   Settings saves are reloaded when the window closes; style/colour/sound apply
   immediately, level at the next match. Other settings writers are disabled while
-  this child owns the draft. Deletion uses the existing parent-shutdown handshake,
-  so no cached writer can recreate deleted data.
+  this child owns the draft. Deletion uses the existing parent-shutdown handshake;
+  independently launched writers must still be closed as required by the
+  [storage deletion contract](../../../lucas-store/README.md#privacy-controls).
 
 ## Threads, eligibility and privacy
 
@@ -83,9 +87,11 @@ freeze it; death/loading/end reset it. Sustained minimap viewing hides the pulse
 and does not create repeated checks. The core policy supplies level-dependent,
 jittered delays and the density cap, not a new app timer.
 
-The camera opens only for a running game in gaze mode or explicit calibration/
-diagnostics. Game end, API loss, timer mode and exit release it; calibration
-waits for the runtime capture thread to release it before opening its own device.
+The camera opens for a running game in gaze mode or a solo game, or for explicit
+setup tracking checks, calibration and diagnostics. Game end, API loss and exit
+release runtime capture; timer mode releases it outside solo play. Settings pauses
+capture; setup diagnostics and calibration wait for the runtime capture thread to
+release the device before opening their own capture.
 Synchronous driver acquisition must return before shutdown can join the thread;
 a wedged camera driver remains a native hardware-test limitation.
 

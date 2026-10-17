@@ -16,8 +16,9 @@ arrow, Shift+arrow, Enter and Esc keys. It does not send input to League.
    default. The status/tooltip should say waiting until League is foreground,
    the player is alive in a supported Summoner's Rift game, and game time is
    **past 1:30**. Once eligible, the first pulse is after ten more seconds.
-3. Confirm amber ripple pulses around the minimap every **10 seconds**. There
-   is no sound. The ring must never take focus or obstruct minimap clicks.
+3. Confirm pulses around the minimap every **10 seconds**, using the saved
+   [pulse appearance and sound choices](../README.md#getting-started).
+   The ring must never take focus or obstruct minimap clicks.
    Check normal movement/clicking through the ring, not just its transparent centre.
 4. Check loading, death, respawn, alt-tab, minimizing and game end. There should
    be no pulse while ineligible; a visible pulse should disappear on alt-tab.
@@ -92,12 +93,14 @@ native overlay correctness.
 
 ### Before the three games
 
-- Launch `lucas.exe` normally. On a new installation the wizard opens. If you
-  already have settings, choose **First-run setup…**. Check the privacy note,
+- Launch `lucas.exe` normally. Check the [setup routing rules](../crates/lucas-app/src/runtime/README.md#before-play),
+  including upgrades with settings but no completed setup. If setup was already
+  completed, choose **First-run setup…** to repeat it. Check the privacy note,
   select your camera and **Check tracking**. Confirm live face/eye status, fps
   and the quality indicator respond; stopping or closing releases the camera.
-- Close halfway through setup, then select **Timer mode (no gaze)** from the tray:
-  eligible timer reminders should work without calibration. While setup/settings
+- On an installation where setup has never completed, close halfway through setup,
+  then select **Timer mode (no gaze)** from the tray: eligible timer reminders
+  should work without calibration. While setup/settings
   is open, reminders must remain suppressed even in timer mode. Change a level or
   the Live Client gate in timer mode, then restart normally: setup must still open.
   Reopening setup starts at the first step with current saved preferences, not the
@@ -149,17 +152,17 @@ native overlay correctness.
 ### Evidence and cleanup
 
 Record the build commit, Windows/display details, camera/lighting, selected levels,
-any missed/false checks, overlay/focus problems, and all three card results. Summaries
-and event timestamps are in `%LOCALAPPDATA%\lucas\games.sqlite3`; settings are in
-`settings.toml` (including `setup_completed`), and calibration in `calibration.json`.
-Unfinished setup stays in memory only. Use **Open data folder**. Quit before copying the
-SQLite database. The app stores no webcam images; share only what you choose.
+any missed/false checks, overlay/focus problems, and all three card results. Use
+**Open data folder** and the [storage reference](../crates/lucas-store/README.md#files-and-schema)
+to locate saved results. Quit before copying the SQLite database. The app stores
+no webcam images; share only what you choose.
 
 After retaining any desired evidence, test **Settings… → Delete all data…**:
 first cancel and confirm data remains, then confirm deletion if you intend to
-remove it. LUCAS must quit before deleting the dedicated data directory. Relaunch
-should start fresh setup. This is irreversible; do not delete the three-game
-results before checking them.
+remove it. Follow the [deletion prerequisites and scope](../crates/lucas-store/README.md#privacy-controls);
+the tray must shut down before removing the managed data. Relaunch should start
+fresh setup. This is irreversible; do not delete the three-game results before
+checking them.
 
 ## G2 — Windows webcam test
 

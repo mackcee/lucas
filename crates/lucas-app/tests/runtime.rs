@@ -937,6 +937,28 @@ fn solo_game_measures_checks_and_deaths_stores_probe_and_resets_for_next_game() 
     let stored = store.summary(&summary.id).unwrap().unwrap();
     assert!(stored.context.probe_game);
     assert_eq!(stored.metrics.pulses, 0);
+    // The native --show-postgame CLI can display this exact replay result.
+    // Synthetic samples exercise the real runtime/store, not webcam accuracy.
+    if let Some(path) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
+        let directory = std::path::Path::new(&path);
+        std::fs::create_dir_all(directory).unwrap();
+        let fixture = directory.join("solo-replay-store");
+        assert!(!fixture.exists(), "refusing to overwrite evidence");
+        let mut evidence_store = Store::open_in(&fixture).unwrap();
+        evidence_store.save_summary(&stored).unwrap();
+        drop(evidence_store);
+        let persisted = Store::open_in(&fixture)
+            .unwrap()
+            .summary(&stored.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted, stored);
+        std::fs::write(
+            directory.join("solo-replay-summary.json"),
+            serde_json::to_vec_pretty(&persisted).unwrap(),
+        )
+        .unwrap();
+    }
     runtime
         .poll(
             Duration::from_secs(30),

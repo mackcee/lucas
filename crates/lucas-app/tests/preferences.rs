@@ -119,6 +119,19 @@ fn first_run_finishes_only_after_calibration_and_sets_completion() {
     expected.setup_completed = true;
     assert_eq!(saved, expected);
     assert!(store.load_calibration().unwrap().is_some());
+    // Export the actual persisted contract, not a hand-authored settings sample.
+    if let Some(path) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
+        let directory = std::path::Path::new(&path).join("completed-setup-store");
+        assert!(!directory.exists(), "refusing to overwrite evidence");
+        std::fs::create_dir_all(&directory).unwrap();
+        for name in ["settings.toml", "calibration.json"] {
+            std::fs::copy(dir.path().join(name), directory.join(name)).unwrap();
+        }
+        let reopened = Store::open_in(&directory).unwrap();
+        assert_eq!(reopened.load_settings().unwrap(), saved);
+        assert!(!needs_setup(&reopened.load_settings().unwrap()));
+        assert!(reopened.load_calibration().unwrap().is_some());
+    }
 }
 
 #[test]

@@ -186,10 +186,11 @@ calibration. Escape cancels without replacing previous weights.
 
 Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
 **in front** of the player. Luma is computed in RAM; no image is stored. A result
-shows mean angular error, sensitivity/FPR and pass/fail. Only passing fits save
-weights/geometry/validation aggregates through `lucas-store` and update the saved
-camera selection; failures retain the previous model. Full calibration samples
-never create a numeric trace file.
+shows mean angular error, sensitivity/FPR and pass/fail. In standalone or tray
+calibration, only passing fits save weights/geometry/validation aggregates through
+`lucas-store` and update the saved camera selection; failures retain the previous
+model. First-run setup instead uses the [draft and Finish contract](src/runtime/README.md#before-play).
+Full calibration samples never create a numeric trace file.
 The separate glance recorder still requires explicit opt-in for each recording.
 
 **Quick check** uses one minimap and one centre target in four seconds. It neither
