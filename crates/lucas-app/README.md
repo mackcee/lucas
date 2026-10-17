@@ -162,10 +162,17 @@ window/amber dot renderer as the glance test presents a 46-second sequence:
 - Five dense minimap-corner points, the last two with a slight head turn.
 - Four independent validation targets (two map looks, centre and lane beside).
 
-The map comes from `lucas-geometry` and the existing League settings reader,
-including flipped maps and MinimapScale. If settings are absent, the existing
-reader falls back to scale 1, bottom-right; set `LUCAS_LEAGUE_ROOT` for a custom
-installation. Each two-second target has a 500 ms prompt followed by a hold;
+The map comes from `lucas-geometry` using the League settings and the saved
+alignment profile for the main-monitor resolution, MinimapScale and flip. See the
+[recording guide](../../docs/testing-on-windows.md#record-the-test-about-10-minutes)
+for settings discovery, fallback and installation overrides, and
+[alignment instructions](../../docs/testing-on-windows.md#one-time-alignment-repeat-whenever-a-patch-moves-the-hud)
+for saving corrections. A missing profile uses the geometry seed; an invalid
+alignment file blocks calibration. The corrected rectangle determines target
+placement, labels and saved-model geometry comparisons. Changing that rectangle
+requires full calibration again before Quick check can reuse a model.
+
+Each two-second target has a 500 ms prompt followed by a hold;
 the first 200 ms after a displayed hold are discarded for settling. Target labels
 are matched to capture acquisition times, not UI receipt. Losing focus leaves
 frames unlabelled; it does not pause the schedule. Missing target coverage fails
@@ -181,8 +188,10 @@ The separate glance recorder still requires explicit opt-in for each recording.
 **Quick check** uses one minimap and one centre target in four seconds. It neither
 refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
 
-1. `calibration::load(store, current_screen, current_minimap)` rejects changed
-   desktop origin/resolution/DPI/map geometry or unsupported model bytes.
+1. Construct `CalibrationScript::new` with the current settings and loaded
+   `AlignmentStore` as above. Pass its `screen().minimap` to
+   `calibration::load(store, current_screen, current_minimap)`, which rejects
+   changed desktop origin/resolution/DPI/map geometry or unsupported model bytes.
 2. Present `CalibrationScript::quick(&model)` using the same fullscreen target
    path; collect `Observation`s by displayed target and acquisition time.
 3. Call `quick_revalidate(&model, observations)` and require

@@ -38,6 +38,10 @@ download a ready-to-run CI build. Camera access requires clicking Connect camera
 recording requires a separate opt-in. Diagnostics use `lucas-game` to locate
 minimap settings and make no network requests.
 
+**M5.1 adds in-app calibration and a per-user minimap classifier**. Open
+`lucas --calibrate` and follow the [calibration guide](crates/lucas-app/README.md#in-app-calibration).
+For offline recording evaluation, see the [G2 evaluator](xtask/README.md#g2-calibration-and-glance-evaluation).
+
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
 can also be built and checked on Linux. Builds will initially be unsigned.
@@ -75,8 +79,8 @@ cargo build --workspace
 cargo run --bin lucas -- --version
 # Windows: start timer mode in the notification area
 cargo run --bin lucas -- --timer
-# Windows diagnostics (models from this checkout):
-cargo run --bin lucas -- --models models
+# Windows diagnostics and calibration (models from this checkout):
+cargo run --bin lucas -- --calibrate --models models
 # Replay numeric traces on Windows or Linux:
 cargo xtask replay path/to/trace.jsonl
 
@@ -118,8 +122,8 @@ metric interpretation and integration.
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
 | `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
-| `lucas-app` | Windows timer tray, alignment, numeric reports, post-game card, gaze debug UI and opt-in traces |
-| `xtask` | Synthetic-player simulator, trace replay, offline model conversion and hash verification |
+| `lucas-app` | Windows timer tray, alignment, numeric reports, post-game card, calibration, gaze debug UI and opt-in traces |
+| `xtask` | Synthetic-player simulator, trace replay and G2 evaluation, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
 [above](#status). The gaze library uses hash-pinned MediaPipe models through ONNX

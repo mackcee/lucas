@@ -78,12 +78,13 @@ real recordings, especially boundary looks, remain essential.
 250 ms maximum sample gap. Unknown interrupts a candidate/confirmed glance.
 No core configuration or game-loop behavior is changed by calibration.
 
-`CalibrationModel::{to_bytes,from_bytes}` encode a **553-byte**, little-endian
-`LUCASC01` version-1 payload: standardization, classifier/regression weights,
-geometry/distance assumption, threshold, target FPR and validation ROC/error/counts.
-The existing store calibration blob wraps these bytes and desktop geometry; JSON
-byte-array expansion makes the containing file larger. No training samples persist.
-Unknown versions, wrong lengths, invalid geometry and nonfinite weights fail closed.
+`CalibrationModel::{to_bytes,from_bytes}` own the versioned binary payload;
+see their [serialization implementation](src/calibration.rs) for the layout and
+validation rules. It retains weights, geometry/distance assumptions and validation
+aggregates, not training samples. The [store calibration file](../lucas-store/README.md#files-and-schema)
+wraps these bytes and desktop geometry; JSON byte-array expansion makes the
+containing file larger. Unknown versions, wrong lengths, invalid geometry and
+nonfinite weights fail closed.
 
 Short calibration validation passes at >=90% per-frame sensitivity, empirical
 FPR <= target, >=80% usable frames and <=5° mean error. This is a local quality

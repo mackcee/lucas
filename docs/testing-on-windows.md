@@ -154,12 +154,9 @@ and repeat, identifying the new position in the note. Run `cargo xtask eval
 calibration recordings, physical monitor dimensions and scoring rules. Synthetic
 tests do not establish real-webcam G2 acceptance.
 
-For the in-app 46-second calibration, open `lucas --calibrate`, connect the camera
-and choose **Start calibration**. Follow the dots and the slight head-turn prompt.
-Enter the monitor's physical size and assumed viewing distance first. Calibration
-stores weights only, not a numeric trace. Use **Quick check** for a four-second
-minimap/centre validation; rerun full calibration after a failure. See the
-[calibration guide](../crates/lucas-app/README.md#in-app-calibration).
+For in-app calibration and **Quick check**, follow the
+[calibration guide](../crates/lucas-app/README.md#in-app-calibration), including
+physical monitor measurements, saved alignment and when to recalibrate.
 
 ### Troubleshooting / development
 

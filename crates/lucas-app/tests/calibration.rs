@@ -245,6 +245,8 @@ fn flipped_and_scaled_minimaps_fit_and_revalidate() {
 }
 #[test]
 fn saved_alignment_controls_targets_labels_and_calibration_reuse() {
+    let evidence = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR").map(std::path::PathBuf::from);
+    let mut reports = Vec::new();
     for flipped in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let settings = MinimapSettings {
@@ -309,10 +311,26 @@ fn saved_alignment_controls_targets_labels_and_calibration_reuse() {
             scale_factor: 1.0,
         };
         save(&store, &model, screen.clone(), 1).unwrap();
-        assert_eq!(
-            load(&store, &screen, script.screen().minimap).unwrap(),
-            Some(model)
-        );
+        let loaded = load(&store, &screen, script.screen().minimap).unwrap();
+        let mut report = serde_json::json!({
+            "synthetic_features_not_webcam_acceptance": true,
+            "flipped": flipped,
+            "aligned_minimap_normalized": script.screen().minimap,
+            "lane_above_target_normalized": above.position,
+            "unchanged_geometry_reuses_model": loaded.is_some(),
+            "changed_alignments": [],
+        });
+        assert_eq!(loaded, Some(model));
+        if let Some(directory) = &evidence {
+            std::fs::create_dir_all(directory).unwrap();
+            for name in ["calibration.json", "alignment.toml"] {
+                std::fs::copy(
+                    dir.path().join(name),
+                    directory.join(format!("aligned-flipped-{flipped}-{name}")),
+                )
+                .unwrap();
+            }
+        }
         for changed in [
             Alignment {
                 scale_multiplier: 1.0,
@@ -337,12 +355,29 @@ fn saved_alignment_controls_targets_labels_and_calibration_reuse() {
                 650.0,
             )
             .unwrap();
-            assert!(
-                load(&store, &screen, script.screen().minimap)
-                    .unwrap()
-                    .is_none()
-            );
+            let reused = load(&store, &screen, script.screen().minimap)
+                .unwrap()
+                .is_some();
+            report["changed_alignments"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "offset_x_px": changed.offset_x_px,
+                    "offset_y_px": changed.offset_y_px,
+                    "scale_multiplier": changed.scale_multiplier,
+                    "minimap_normalized": script.screen().minimap,
+                    "reuses_saved_model": reused,
+                }));
+            assert!(!reused);
         }
+        reports.push(report);
+    }
+    if let Some(directory) = evidence {
+        std::fs::write(
+            directory.join("alignment-calibration-reuse.json"),
+            serde_json::to_vec_pretty(&reports).unwrap(),
+        )
+        .unwrap();
     }
 }
 #[test]
