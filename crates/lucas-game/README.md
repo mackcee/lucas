@@ -1,0 +1,64 @@
+# lucas-game
+
+Read-only game-state integration for the Windows MVP. Portable logic and HTTPS
+tests run on Linux; only `Win32WindowProbe` is Windows-specific.
+
+## Integration contract
+
+- Create `LiveClient` on a dedicated blocking worker thread. Feed it into
+  `Poller::new`; call `poll_if_due` with elapsed monotonic time. It polls at most
+  once per second, without catch-up bursts. Four bounded subset requests fetch
+  active identity, players, events and (last) game time. Each request has a 750 ms
+  deadline, so a degraded poll may exceed the normal one-second cadence.
+- Timestamp successful polls **at completion**, with the same monotonic origin as
+  gaze samples, and call `GameState::update`. On errors call `unavailable` and
+  retain the error for diagnostics. Do not log/persist player lists by default.
+- `eligibility(now).eligible()` requires a fresh snapshot, game time **>90 s**,
+  map 11, verified `CLASSIC` mode, resolved living player, and no inferred pause.
+  Evaluate it every core tick. The adapter to lucas-core's types belongs in the
+  app; this crate deliberately does not couple to that parallel implementation.
+- Combine that gate with `WindowProbe::sample()?.overlay_eligible()` and face/gaze
+  validity. Window-only fallback is an **explicit app policy**, never enabled by
+  an HTTP/TLS failure inside this library. It cannot infer deaths, map or loading.
+- A stall **>2 s** infers a pause; a successful snapshot **>=3 s** old is stale.
+  `game_time_at` interpolates recent poll pairs, clamps just after the latest
+  sample instead of advancing with wall time, and refuses outage gaps. Precision
+  is approximately one poll; pauses are inferred, not directly exposed by Riot.
+- `StateUpdate::deaths` contains exact EventTime values and event IDs, once per
+  session, including catch-up events when attaching mid-game. The core compares
+  them against gaze history for the >=8 s blind-death rule (unknown if history or
+  gaze quality is insufficient). No blind classification is guessed here.
+- `StateUpdate::events` includes newly seen objective/turret events without
+  changing coaching behavior. `respawned` tells the core to reset its gap clock.
+  `game_end` is authoritative only for GameEnd. API loss sets phase Ended but can
+  be transient; retain session data until reconnect/session resolution. Event IDs
+  survive outages. A >1 s game-time rollback starts a new session; the API has no
+  stable game ID, so a caller may use `reset()` at a known session boundary.
+
+## Settings and windows
+
+`SettingsLocator::windows_defaults(explicit_install_root)` checks an explicit
+root, the Riot install manifest, and standard Windows paths. `candidates()` yields
+PersistedSettings.json before game.cfg for each root. Pass `SettingsFile::read()`
+text and its `SettingsFormat` to lucas-geometry's parser, falling through on read
+or parse error. Parsing HUD values is intentionally not duplicated in this crate.
+
+The Win32 probe uses only window/monitor metadata and shell notification state:
+`FindWindowW(RiotWindowClass)`, foreground and geometry checks, and
+`SHQueryUserNotificationState`. It never opens a game process or installs hooks.
+The app must be per-monitor DPI-aware for physical screen coordinates.
+Exclusive-fullscreen detection is a **heuristic**, not a swapchain inspection;
+a foreground undecorated monitor-sized window plus the shell D3D fullscreen
+signal is suppressed. Borderless/Windowed remain the supported configurations.
+Errors/unknown mode must suppress the overlay. Validate this heuristic on a real
+Windows League session; portable tests cannot prove compositor behavior.
+
+## Validation
+
+```sh
+cargo test -p lucas-game
+cargo clippy -p lucas-game --all-targets -- -D warnings
+```
+
+See `certs/README.md` for trust-anchor provenance and
+`tests/fixtures/README.md` for fixture provenance.
