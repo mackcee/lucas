@@ -105,9 +105,15 @@ fn sample_stream_recovers_from_loss_gap_and_invalid_timestamp() {
     let camera = FixtureCamera {
         portrait: portrait(),
         steps: vec![
-            (0, true), (33, true), (66, false), (99, true),
-            (400, true), (400, true), (433, true),
-        ].into_iter(),
+            (0, true),
+            (33, true),
+            (66, false),
+            (99, true),
+            (400, true),
+            (400, true),
+            (433, true),
+        ]
+        .into_iter(),
     };
     let tracker = MediaPipeLandmarker::new(backend());
     let mut source = WebcamGazeSource::new(camera, tracker).unwrap();
@@ -125,7 +131,10 @@ fn sample_stream_recovers_from_loss_gap_and_invalid_timestamp() {
         if millis == 0 {
             initial_features = sample.features;
         } else if millis == 99 || millis == 400 {
-            assert_eq!(sample.features, initial_features, "filter resets after loss/gap");
+            assert_eq!(
+                sample.features, initial_features,
+                "filter resets after loss/gap"
+            );
         }
         println!("GazeSource sample: {sample:?}");
     }
@@ -135,7 +144,10 @@ fn sample_stream_recovers_from_loss_gap_and_invalid_timestamp() {
     let recovered = source.next_sample().unwrap().expect("recovered sample");
     assert_eq!(recovered.timestamp, Duration::from_millis(433));
     assert!(recovered.features.is_some() && recovered.quality > 0.1);
-    assert_eq!(recovered.features, initial_features, "filter resets after error");
+    assert_eq!(
+        recovered.features, initial_features,
+        "filter resets after error"
+    );
     println!("After timestamp failure: {recovered:?}");
     assert!(source.next_sample().unwrap().is_none());
     println!("GazeSource EOF: None (distinct from unknown sample)");
