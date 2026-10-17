@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install repository-pinned Rust toolchain and components
@@ -35,7 +35,7 @@ jobs:
           key: linux-checks
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Cache ONNX Runtime downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ort.pyke.io
           key: ort-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
@@ -45,7 +45,7 @@ jobs:
         # Empty until the gaze/model chunk adds assets; never cache source or notices.
         # Model manifests/conversion tooling must live in models/ or xtask/ so edits
         # invalidate this key. Do not fall back to an older set of model files.
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             models/**/*.onnx
@@ -72,7 +72,7 @@ jobs:
       CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
     steps:
       - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install repository-pinned Rust MSVC toolchain and components
@@ -85,7 +85,7 @@ jobs:
           key: windows-msvc
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Cache ONNX Runtime downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ort.pyke.io
           key: ort-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
@@ -93,7 +93,7 @@ jobs:
             ort-v1-${{ runner.os }}-${{ runner.arch }}-
       - name: Reserve model-file cache
         # Same reserved assets/key inputs as Linux; model acquisition comes later.
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             models/**/*.onnx
