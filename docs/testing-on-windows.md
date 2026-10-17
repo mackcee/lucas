@@ -120,16 +120,21 @@ unknown eyes, or low fps are reasons to adjust lighting and placement first.
 - Leave duration at **600 seconds** for 100 trials: 50 minimap targets alternating
   with 50 elsewhere targets. Each trial has a 2-second centre countdown and a
   4-second target hold. Centre, corners and edges provide calibration inputs;
-  the lower-right corner is represented by the minimap, not a negative target.
+  positions inside or close to the minimap are excluded from elsewhere targets.
   For a quick equipment check choose **60 seconds**; durations must be multiples
-  of 6, from 60 to 3600 seconds. A short test is not the full evaluation session.
+  of 6, from 60 to 600 seconds. A short test is not the full evaluation session.
 - Check **I agree to save a numeric trace for this test**, then **Start fullscreen
   glance test**. Look at the countdown; when the dot appears, look at its centre
   and keep looking there until it disappears. Keep your head comfortable and
   mostly still. **Esc** ends early and saves a trace marked cancelled.
-- The minimap target is computed with `lucas-geometry`, default `MinimapScale=1`
-  and bottom-right placement at the actual main-monitor resolution. This is a
-  test target, not an alignment measurement of your League settings.
+- The minimap target uses `lucas-geometry` at the actual main-monitor resolution.
+  Before each test, LUCAS reads `MinimapScale` and `FlipMiniMap` from the discovered
+  League installation's `Config/PersistedSettings.json`. Only when no file is
+  found does it use scale 1 and bottom-right placement. An unreadable, malformed,
+  or incomplete settings file blocks recording rather than silently defaulting.
+  The trace header records the source and values, without the installation path.
+  Elsewhere targets stay outside the minimap plus a margin of 4% of screen height.
+  This is a geometry seed, not an in-game alignment measurement.
 - At completion, click **Open traces folder**. Files are at
   `%LOCALAPPDATA%\lucas\traces\glance-<timestamp>-<pid>.jsonl`.
   **The file contains no images**, only numeric features/timestamps/targets and
@@ -154,8 +159,8 @@ and fitting are M5.1; this build does not claim that the criterion has passed.
   Countdown and unfocused frames are not ground-truth fixations. Re-run if you
   were distracted. Stop/cancel uses an explicit end record; the UI reports the
   saved path only after a successful flush.
-- From a source checkout: `cargo run -p lucas-app -- --debug-gaze --models models`.
-  `lucas.exe --glance-test --seconds 60` opens the same setup; consent is still
+- From a source checkout: `cargo run -p lucas-app -- --models models`.
+  `lucas.exe --seconds 60` opens the same setup; consent is still
   required. `lucas.exe --check-runtime` checks packaged models/runtime without
   opening the camera. `--version` and `--help` do not open a window.
 - Offline, on Windows or Linux: `cargo xtask replay path/to/trace.jsonl` prints

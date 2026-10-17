@@ -1,6 +1,9 @@
 //! Versioned JSON-lines traces. Only scalar metadata and derived numeric features
 //! can cross this boundary; neither Frame nor image buffers are accepted.
-use crate::script::{Phase, Target, TargetKind};
+use crate::{
+    script::{Phase, Target, TargetKind},
+    settings::MinimapSelection,
+};
 use lucas_gaze::{GazeFeatures, GazeSample, GazeSource, source::TraceGazeSource};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -44,6 +47,7 @@ pub struct Header {
     pub dpi_scale: f64,
     pub lighting_note: String,
     pub script_seconds: u64,
+    pub minimap: MinimapSelection,
 }
 impl Header {
     fn validate(&self) -> Result<()> {
@@ -60,7 +64,11 @@ impl Header {
         {
             return Err("invalid trace metadata".into());
         }
-        crate::script::Script::new(self.script_seconds, self.monitor_resolution)?;
+        crate::script::Script::new(
+            self.script_seconds,
+            self.monitor_resolution,
+            self.minimap.settings(),
+        )?;
         Ok(())
     }
 }
@@ -370,6 +378,11 @@ mod tests {
             dpi_scale: 1.5,
             lighting_note: "daylight".into(),
             script_seconds: 60,
+            minimap: MinimapSelection {
+                source: crate::settings::MinimapSource::PersistedSettings,
+                minimap_scale: 3.0,
+                flipped: true,
+            },
         }
     }
     fn frame(n: u64, value: Option<f32>, kind: Option<TargetKind>) -> FrameRecord {

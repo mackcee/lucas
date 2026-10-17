@@ -42,17 +42,21 @@ fn help_and_bad_options_never_open_a_camera_or_window() {
     for args in [
         vec!["--seconds"],
         vec!["--seconds", "61"],
+        vec!["--seconds", "606"],
         vec!["--models"],
         vec!["--unknown"],
+        vec!["--debug-gaze"],
+        vec!["--glance-test"],
     ] {
-        assert!(
-            !Command::new(env!("CARGO_BIN_EXE_lucas"))
-                .args(args)
-                .output()
-                .unwrap()
-                .status
-                .success()
-        );
+        let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        if matches!(args[0], "--debug-gaze" | "--glance-test") {
+            assert_eq!(output.status.code(), Some(2));
+            assert_eq!(output.stderr, b"Unknown arguments. Use --help.\n");
+        }
     }
 }
 

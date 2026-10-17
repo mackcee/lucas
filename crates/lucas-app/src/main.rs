@@ -10,7 +10,7 @@ mod debug_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
-const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas [--debug-gaze | --glance-test] [--seconds 600] [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..3600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -60,7 +60,6 @@ fn run() -> Result<(), String> {
                 println!("{HELP}");
                 return Ok(());
             }
-            "--debug-gaze" | "--glance-test" => {}
             "--seconds" => {
                 seconds = args
                     .next()
@@ -76,7 +75,7 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    lucas_app::script::Script::new(seconds, [1920, 1080]).map_err(str::to_owned)?;
+    lucas_app::script::validate_duration(seconds).map_err(str::to_owned)?;
     #[cfg(windows)]
     {
         if check_runtime {

@@ -18,8 +18,8 @@ egui_plot = "0.37.0"
 lucas-core = { path = "../lucas-core" }
 lucas-store = { path = "../lucas-store" }
 lucas-overlay = { path = "../lucas-overlay" }
-lucas-gaze = { path = "../lucas-gaze", default-features = false }
 lucas-game = { path = "../lucas-game" }
+lucas-gaze = { path = "../lucas-gaze", default-features = false }
 lucas-geometry = { path = "../lucas-geometry" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

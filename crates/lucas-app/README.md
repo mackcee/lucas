@@ -89,7 +89,8 @@ One UTF-8 JSON object per line, in this order:
 
 - `record: "header"`: `schema_version`, `app_version`, `started_unix_ms`, `camera`
   (`name`, negotiated `resolution: [width,height]`, requested/negotiated `fps`),
-  `monitor_resolution`, `dpi_scale`, `lighting_note`, and `script_seconds`.
+  `monitor_resolution`, `dpi_scale`, `lighting_note`, `script_seconds`, and `minimap`
+  (`source`: `persisted_settings` or `default`, `minimap_scale`, `flipped`).
 - `record: "frame"`: `timestamp_ns` since test start, `source_timestamp_ns` since
   camera-open, `features`, `raw_features`, `face_found`, `quality` (0..1), `cpu_ms`,
   `phase` and `target`.
@@ -132,9 +133,15 @@ line, 120,000 frames (one hour at 30 fps plus headroom), and a 2 KiB note.
 
 `Script::at` is pure: 2 seconds of countdown then 4 seconds of hold per trial,
 alternating elsewhere/minimap, 600 seconds by default. Elsewhere positions rotate
-through centre, corners/edges and near-map negatives. Geometry uses the main
-monitor's physical dimensions and `MinimapSettings::default()`, without calibration.
-Shorter tests retain alternation but may not visit every calibration position.
+through centre, corners/edges and near-map negatives, excluding positions inside
+or within 4% of screen height of the minimap. Geometry uses the main monitor's
+physical dimensions and the resolved `MinimapScale` and `FlipMiniMap` from
+`PersistedSettings.json`, without calibration. Discovery uses `lucas-game`'s
+Windows installation locator and reader; only a missing file permits
+`MinimapSettings::default()`. Read, parse and missing-field errors block recording.
+The trace header records the source and resolved values, not the local path.
+Durations are 60–600 seconds in multiples of six. Shorter tests retain alternation
+but may not visit every calibration position.
 
 ```sh
 cargo test -p lucas-app

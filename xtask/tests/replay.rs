@@ -20,6 +20,11 @@ fn replay_cli_reports_synthetic_trace_and_rejects_missing_end() {
         dpi_scale: 1.0,
         lighting_note: "synthetic".into(),
         script_seconds: 60,
+        minimap: lucas_app::settings::MinimapSelection {
+            source: lucas_app::settings::MinimapSource::Default,
+            minimap_scale: 1.0,
+            flipped: false,
+        },
     };
     let mut writer = TraceWriter::new(File::create(&path).unwrap(), header).unwrap();
     for i in 0..3 {

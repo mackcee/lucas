@@ -3,8 +3,8 @@
 
 #[forbid(unsafe_code)]
 pub mod postgame;
+pub mod script;
 #[forbid(unsafe_code)]
 pub mod settings;
-pub mod script;
 pub mod timer;
 pub mod trace;

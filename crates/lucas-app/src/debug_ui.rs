@@ -1,7 +1,8 @@
 use crate::capture::{Diagnostic, Presentation, Worker};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, RichText, Stroke, Vec2, ViewportCommand};
 use lucas_app::{
-    script::{Phase, Script},
+    script::{Phase, Script, validate_duration},
+    settings::MinimapSelection,
     trace::{CameraInfo, EndReason, FEATURE_NAMES, Header},
 };
 use std::{
@@ -161,8 +162,10 @@ impl DebugApp {
                     "No recent camera frames. Reconnect the camera before recording.".into(),
                 );
             }
-            let script =
-                Script::new(self.seconds, self.monitor.resolution).map_err(str::to_owned)?;
+            let minimap =
+                MinimapSelection::resolve(&lucas_game::SettingsLocator::windows_defaults(None))?;
+            let script = Script::new(self.seconds, self.monitor.resolution, minimap.settings())
+                .map_err(str::to_owned)?;
             let started = Instant::now();
             let header = Header {
                 schema_version: 1,
@@ -182,6 +185,7 @@ impl DebugApp {
                 dpi_scale: scale as f64,
                 lighting_note: self.lighting.clone(),
                 script_seconds: self.seconds,
+                minimap,
             };
             state
                 .start(&trace_directory()?, header, started)
@@ -339,7 +343,7 @@ impl DebugApp {
                 ui.label("Follow each dot with your eyes; keep your head comfortable and mostly still. Look at the countdown between dots. The main monitor will fill the screen. Esc saves a partial test.");
                 ui.horizontal(|ui| {
                     ui.label("Duration (seconds)");
-                    ui.add(egui::DragValue::new(&mut self.seconds).range(60..=3600).speed(6));
+                    ui.add(egui::DragValue::new(&mut self.seconds).range(60..=600).speed(6));
                     ui.label("multiples of 6; default 600");
                 });
                 ui.label("Lighting / camera placement note");
@@ -348,7 +352,7 @@ impl DebugApp {
                 ui.label(RichText::new("This file contains no images.").strong());
                 ui.label("Only eye/face features, head pose, quality, timings and shown targets are saved locally. Nothing is uploaded. Share the trace yourself only if you choose.");
                 ui.checkbox(&mut self.consent, "I agree to save a numeric trace for this test");
-                let valid_duration = Script::new(self.seconds, self.monitor.resolution).is_ok();
+                let valid_duration = validate_duration(self.seconds).is_ok();
                 if !valid_duration { ui.label("Choose a duration divisible by 6 seconds."); }
                 if ui.add_enabled(fresh && self.consent && valid_duration && self.pending.is_none(), egui::Button::new("Start fullscreen glance test")).clicked() { self.arm_test(); }
                 if self.pending.is_some() { ui.label("Moving to the main monitor…"); }

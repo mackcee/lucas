@@ -74,7 +74,7 @@ cargo run --bin lucas -- --version
 # Windows: start timer mode in the notification area
 cargo run --bin lucas -- --timer
 # Windows diagnostics (models from this checkout):
-cargo run --bin lucas -- --debug-gaze --models models
+cargo run --bin lucas -- --models models
 # Replay numeric traces on Windows or Linux:
 cargo xtask replay path/to/trace.jsonl
 

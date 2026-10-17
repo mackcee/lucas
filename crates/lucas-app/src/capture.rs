@@ -80,6 +80,7 @@ impl Shared {
         });
         self.recording_path = Some(path);
         self.saved = None;
+        self.error = None;
         Ok(())
     }
     /// Called when a new target is submitted to egui, not recomputed from the
@@ -275,4 +276,45 @@ fn run(
         context.request_repaint();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lucas_app::{settings::MinimapSelection, trace::CameraInfo};
+
+    #[test]
+    fn successful_restart_clears_previous_recording_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = Shared {
+            error: Some("Recording stopped: disk full".into()),
+            ..Default::default()
+        };
+        let mut header = Header {
+            schema_version: 1,
+            app_version: "test".into(),
+            started_unix_ms: 0,
+            camera: CameraInfo {
+                name: "synthetic".into(),
+                resolution: [1280, 720],
+                fps: 30,
+            },
+            monitor_resolution: [1920, 1080],
+            dpi_scale: 1.0,
+            lighting_note: String::new(),
+            script_seconds: 61,
+            minimap: MinimapSelection::resolve(&lucas_game::SettingsLocator::default()).unwrap(),
+        };
+        assert!(state.start(directory.path(), header.clone(), Instant::now()).is_err());
+        assert!(state.error.is_some());
+        assert!(!state.is_recording());
+        header.started_unix_ms = 1;
+        header.script_seconds = 60;
+        state.start(directory.path(), header, Instant::now()).unwrap();
+        assert!(state.error.is_none());
+        assert!(state.is_recording());
+        state.finish(EndReason::Completed);
+        assert!(state.saved.as_ref().unwrap().is_file());
+        assert!(state.error.is_none());
+    }
 }
