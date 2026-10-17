@@ -55,9 +55,9 @@ can also be built and checked on Linux. Builds will initially be unsigned.
    keeping `models/` and the runtime DLLs beside `lucas.exe`. Builds are unsigned.
 2. **Run `lucas.exe`.** First-run setup walks through camera choice and live tracking
    quality, a skippable Borderless check, calibration, next-game minimap alignment
-   and a starting level. Frames are never stored; nothing leaves your PC. Close setup
-   to save your place, then reopen **First-run setup…** from the notification-area
-   icon. Finish returns to the tray. In your next game, choose **Align minimap…**,
+   and a starting level. Frames are never stored; nothing leaves your PC. Closing
+   setup discards unfinished changes; reopen **First-run setup…** from the
+   notification-area icon to start again. Finish returns to the tray. In your next game, choose **Align minimap…**,
    then complete the tray's quick gaze check before play. Changed geometry may need
    explicit recalibration.
 3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
@@ -79,7 +79,7 @@ never written to disk. Nothing is sent off the machine. The only
 network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
-Normal-use local persistence is limited to settings (including a resumable setup draft), calibration, and per-game summaries
+Normal-use local persistence is limited to settings, calibration, and per-game summaries
 (including event timestamps); see the [storage reference](crates/lucas-store/README.md)
 for files and deletion scope. The tray records games; the standalone viewer only
 opens saved summaries.

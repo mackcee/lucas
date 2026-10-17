@@ -107,30 +107,10 @@ impl Controls {
             }
         }
     }
-    fn checkpoint(&mut self) -> bool {
-        match self
-            .setup
-            .as_ref()
-            .map(|s| s.checkpoint(&self.folder))
-            .transpose()
-        {
-            Ok(_) => true,
-            Err(e) => {
-                self.error = Some(format!(
-                    "Could not save setup progress: {e}. Free disk space and retry."
-                ));
-                false
-            }
-        }
-    }
     fn cancel(&mut self, ctx: &egui::Context) {
-        if self.checkpoint() {
-            self.worker = None;
-            self.closing = true;
-            ctx.send_viewport_cmd(ViewportCommand::Close);
-        } else {
-            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-        }
+        self.worker = None;
+        self.closing = true;
+        ctx.send_viewport_cmd(ViewportCommand::Close);
     }
     fn camera(&mut self, ui: &mut egui::Ui) {
         ui.label("Sit as you will during play. Use front lighting and close other apps using the webcam.");
@@ -156,7 +136,6 @@ impl Controls {
         });
         if index != selected {
             self.setup.as_mut().unwrap().select_camera(index);
-            self.checkpoint();
         }
         if self.cameras.is_empty() {
             ui.label("No camera found. Connect one and allow desktop apps in Windows Settings > Privacy > Camera.");
@@ -226,7 +205,7 @@ impl Controls {
                 ui.add_space(12.0);
                 ui.strong("Your camera stays private.");
                 ui.label("Webcam frames are never stored and nothing leaves this PC. Only settings, calibration and per-game summaries with event timestamps are saved locally.");
-                ui.label("Setup covers your camera, Borderless mode and calibration. You can close it and resume from the tray at any time.");
+                ui.label("Setup covers your camera, Borderless mode and calibration. Closing discards unfinished changes; reopen from the tray to start again with your saved settings.");
             }
             SetupStep::Camera => self.camera(ui),
             SetupStep::Borderless => {
@@ -243,7 +222,6 @@ impl Controls {
                 ui.label("This is a best-effort window check; it does not read game pixels or change League settings.");
                 if ui.button("Skip check for now").clicked() {
                     self.setup.as_mut().unwrap().skip_borderless();
-                    self.checkpoint();
                 }
             }
             SetupStep::Calibration => {
@@ -254,7 +232,6 @@ impl Controls {
                 if ui.button("Open calibration").clicked() {
                     self.worker = None;
                     self.setup.as_mut().unwrap().begin_calibration();
-                    self.checkpoint();
                     match DebugApp::for_setup(
                         self.window.clone(),
                         self.models.clone(),
@@ -285,7 +262,6 @@ impl Controls {
             {
                 self.worker = None;
                 self.setup.as_mut().unwrap().back();
-                self.checkpoint();
             }
             let can_next = match step {
                 SetupStep::Camera => self
@@ -319,9 +295,8 @@ impl Controls {
             {
                 self.worker = None;
                 self.setup.as_mut().unwrap().advance();
-                self.checkpoint();
             }
-            if ui.button("Save and close for now").clicked() {
+            if ui.button("Close without saving").clicked() {
                 self.cancel(ui.ctx());
             }
         });
@@ -417,7 +392,6 @@ impl App for Controls {
                 if let Some(profile) = profile.filter(|_| passed) {
                     self.setup.as_mut().unwrap().calibrated(profile);
                 }
-                self.checkpoint();
             }
         }
     }

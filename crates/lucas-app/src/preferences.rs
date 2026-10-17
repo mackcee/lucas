@@ -1,8 +1,6 @@
-//! Manual choices and resumable setup. No automatic promotion or scheduling.
+//! Manual choices and in-memory setup. No automatic promotion or scheduling.
 use lucas_core::{Phase, TRAINING_LEVELS, TrainingLevel};
 use lucas_store::{Settings, Store};
-use serde::{Deserialize, Serialize};
-use std::{io::Write, path::Path};
 
 pub fn level_label(level: TrainingLevel) -> String {
     let seconds = level.pulse_delay_ms.map(|ms| ms as f64 / 1000.0);
@@ -30,12 +28,20 @@ pub fn level_label(level: TrainingLevel) -> String {
     }
 }
 
+pub fn selectable_levels() -> impl Iterator<Item = (usize, TrainingLevel)> {
+    TRAINING_LEVELS
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, level)| level.phase != Phase::Baseline)
+}
+
 pub fn level_picker(ui: &mut eframe::egui::Ui, index: &mut usize) {
     eframe::egui::ComboBox::from_label("Training level")
         .selected_text(level_label(TRAINING_LEVELS[*index]))
         .show_ui(ui, |ui| {
-            for (i, level) in TRAINING_LEVELS.iter().enumerate() {
-                ui.selectable_value(index, i, level_label(*level));
+            for (i, level) in selectable_levels() {
+                ui.selectable_value(index, i, level_label(level));
             }
         });
     let level = TRAINING_LEVELS[*index];
@@ -52,7 +58,7 @@ pub fn level_picker(ui: &mut eframe::egui::Ui, index: &mut usize) {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SetupStep {
     #[default]
     Intro,
@@ -86,8 +92,7 @@ impl SetupStep {
 }
 
 /// Draft settings, calibration weights and wizard position, never samples.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug)]
 pub struct Setup {
     pub step: SetupStep,
     pub draft: Settings,
@@ -95,7 +100,6 @@ pub struct Setup {
     calibrated_camera: Option<u32>,
     calibration: Option<lucas_store::Calibration>,
 }
-const DRAFT_FILE: &str = "setup-draft.toml";
 impl Setup {
     pub fn new(settings: Settings) -> Self {
         Self {
@@ -107,43 +111,7 @@ impl Setup {
         }
     }
     pub fn load(store: &Store) -> crate::trace::Result<Self> {
-        let path = store.data_folder().join(DRAFT_FILE);
-        match std::fs::read_to_string(path) {
-            Ok(text) => {
-                let mut setup: Self = toml::from_str(&text)?;
-                setup.draft.validate()?;
-                if let Some(profile) = &setup.calibration {
-                    profile.validate()?;
-                    let model =
-                        lucas_gaze::calibration::CalibrationModel::from_bytes(&profile.model)?;
-                    if !model
-                        .validation()
-                        .passes(model.target_false_positive_rate())
-                    {
-                        return Err("Draft calibration did not pass validation".into());
-                    }
-                }
-                if !setup.calibration_passed() {
-                    setup.calibrated_camera = None;
-                    if setup.step.number() > SetupStep::Calibration.number() {
-                        setup.step = SetupStep::Calibration;
-                    }
-                }
-                Ok(setup)
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(Self::new(store.load_settings()?))
-            }
-            Err(e) => Err(e.into()),
-        }
-    }
-    pub fn checkpoint(&self, folder: &Path) -> crate::trace::Result<()> {
-        self.draft.validate()?;
-        let mut file = tempfile::NamedTempFile::new_in(folder)?;
-        file.write_all(toml::to_string(self)?.as_bytes())?;
-        file.as_file().sync_all()?;
-        file.persist(folder.join(DRAFT_FILE))?;
-        Ok(())
+        Ok(Self::new(store.load_settings()?))
     }
     pub fn select_camera(&mut self, index: u32) {
         if self.draft.camera_index != index {
@@ -194,24 +162,22 @@ impl Setup {
         }
         let profile = self.calibration.as_ref().ok_or("Missing calibration")?;
         profile.validate()?;
-        self.checkpoint(store.data_folder())?;
-        // Fail closed across the two durable files: a crash must never pair a
-        // new camera with old weights. The draft keeps Finish retryable.
+        let mut settings = self.draft.clone();
+        settings.setup_completed = false;
+        settings.validate()?;
         match std::fs::remove_file(store.data_folder().join("calibration.json")) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
-        store.save_settings(&self.draft)?;
+        store.save_settings(&settings)?;
         store.save_calibration(profile)?;
-        match std::fs::remove_file(store.data_folder().join(DRAFT_FILE)) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.into()),
-        }
+        settings.setup_completed = true;
+        store.save_settings(&settings)?;
+        Ok(())
     }
 }
 
-pub fn needs_setup(folder: &Path) -> std::io::Result<bool> {
-    Ok(!folder.join("settings.toml").try_exists()? || folder.join(DRAFT_FILE).try_exists()?)
+pub fn needs_setup(settings: &Settings) -> bool {
+    !settings.setup_completed
 }

@@ -123,6 +123,7 @@ impl Runtime {
         self.settings.level_index = settings.level_index;
         self.settings.pulse = settings.pulse.clone();
         self.settings.density_cap = settings.density_cap;
+        self.settings.setup_completed = settings.setup_completed;
         Ok(())
     }
     pub fn arm_solo(&mut self, armed: bool) {

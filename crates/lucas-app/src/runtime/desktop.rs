@@ -189,7 +189,7 @@ impl Desktop {
             } else if !self.delete_requested {
                 self.controls_notice = Some(
                     if status.code() == Some(3) {
-                        "Settings closed; resume setup from the tray if needed"
+                        "Settings closed; reopen setup from the tray if needed"
                     } else {
                         "Settings window failed; reopen it from the tray to retry"
                     }

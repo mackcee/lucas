@@ -8,15 +8,17 @@ sound drive gaze coaching. The tray's **Training level (next game)** submenu and
 
 ## Before play
 
-- With no settings file (or an unfinished setup draft), normal launch opens a
-  six-step first-run wizard: privacy, camera/quality, skippable Borderless check,
-  the existing calibration UI, next-game alignment instructions, and starting
-  level. **First-run setup…** reopens it. Close saves the draft; Finish commits
-  settings and calibration. Draft camera choices/weights cannot replace the live
-  pair before Finish; an interrupted commit fails closed and remains resumable.
-  Explicit `--timer` bypasses setup for no-camera diagnostics; switching to gaze
-  invokes setup when required.
-- With saved settings but no passing calibration, launch opens calibration
+- Until `setup_completed` is true in settings, normal launch opens a six-step
+  first-run wizard: privacy, camera/quality, skippable Borderless check, the existing
+  calibration UI, next-game alignment instructions, and starting level.
+  **First-run setup…** reopens it with current settings. Close discards the in-memory
+  draft; only Finish commits settings, calibration and the completion flag. Draft
+  camera choices/weights cannot replace the live pair before Finish; a failed save
+  remains retryable while the window is open. Ordinary settings saves do not
+  complete setup. Explicit `--timer` or the tray's timer mode bypasses setup for
+  no-camera diagnostics, but an open settings/setup window still pauses coaching.
+  Switching to gaze invokes setup when required.
+- With completed setup but no passing calibration, launch opens calibration
   **only if League is not running**. Connect the camera and run full calibration.
 - At every game start, choose **Quick check required (4 seconds)** in the tray.
   This deliberately uses a player-initiated window rather than stealing focus
@@ -40,7 +42,8 @@ sound drive gaze coaching. The tray's **Training level (next game)** submenu and
 
 ## Manual controls and solo games
 
-- Level labels and delays come from `lucas-core::TRAINING_LEVELS`. A choice is
+- Level labels and delays come from `lucas-core::TRAINING_LEVELS`, excluding the
+  compatibility-only Baseline level from both selectors. A choice is
   saved through `lucas-store` before changing the pending preference. The current
   match keeps its policy, standard and density-cap snapshot, including across a
   Live Client/window-only gate switch. There is no automatic level progression.

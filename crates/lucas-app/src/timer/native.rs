@@ -73,7 +73,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let mut gaze = crate::runtime::desktop::Desktop::new(origin)?;
     // Explicit --timer remains a no-camera diagnostic fallback. Normal launch
     // (or switching to gaze below) requires first-run setup.
-    let mut setup_pending = !timer_mode && crate::preferences::needs_setup(&folder)?;
+    let mut setup_pending = !timer_mode && crate::preferences::needs_setup(gaze.runtime.settings());
     let mut timer = Timer::default();
     if !gaze.runtime.settings().live_client_gate {
         timer.set_mode(GateMode::WindowOnly);
@@ -96,19 +96,20 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let timer_option = CheckMenuItem::new("Timer mode (no gaze)", true, timer_mode, None);
     let calibrate = MenuItem::new("Calibrate gaze...", true, None);
     let levels = Submenu::new("Training level (next game)", true);
-    let level_items: Vec<_> = lucas_core::TRAINING_LEVELS
-        .iter()
-        .enumerate()
+    let level_items: Vec<_> = crate::preferences::selectable_levels()
         .map(|(i, level)| {
-            CheckMenuItem::new(
-                crate::preferences::level_label(*level),
-                true,
-                i == gaze.runtime.settings().level_index,
-                None,
+            (
+                i,
+                CheckMenuItem::new(
+                    crate::preferences::level_label(level),
+                    true,
+                    i == gaze.runtime.settings().level_index,
+                    None,
+                ),
             )
         })
         .collect();
-    for item in &level_items {
+    for (_, item) in &level_items {
         levels.append(item)?;
     }
     let solo = CheckMenuItem::new("Next game solo (no pulses)", true, false, None);
@@ -264,12 +265,14 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == *quit.id() {
                 quit_requested = true;
-            } else if let Some(index) = level_items.iter().position(|item| event.id == *item.id()) {
+            } else if let Some((index, _)) =
+                level_items.iter().find(|(_, item)| event.id == *item.id())
+            {
                 if gaze.editing() || gaze.calibrating() || setup_pending {
                     continue;
                 }
                 let mut updated = gaze.runtime.settings().clone();
-                updated.level_index = index;
+                updated.level_index = *index;
                 match lucas_store::Store::open().and_then(|s| s.save_settings(&updated)) {
                     Ok(()) => {
                         gaze.runtime.update_preferences(&updated)?;
@@ -289,14 +292,15 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
             } else if event.id == *preferences.id() || event.id == *setup.id() {
                 alignment = None;
                 if let Err(error) = gaze.launch_controls(
-                    crate::preferences::needs_setup(&folder)? || event.id == *setup.id(),
+                    crate::preferences::needs_setup(gaze.runtime.settings())
+                        || event.id == *setup.id(),
                 ) {
                     notice_item.set_text(format!("Cannot open settings: {error}"));
                 }
             } else if event.id == *timer_option.id() {
                 timer_mode = timer_option.is_checked();
                 timer.reset();
-                if !timer_mode && crate::preferences::needs_setup(&folder)? {
+                if !timer_mode && crate::preferences::needs_setup(gaze.runtime.settings()) {
                     setup_pending = true;
                     gaze.launch_controls(true)?;
                 }
@@ -511,15 +515,12 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
             crate::runtime::CalibrationState::Ready => "Recalibrate gaze...",
         });
         calibrate.set_enabled(!gaze.calibrating() && !gaze.editing() && !setup_pending);
-        if !gaze.editing() {
-            setup_pending =
-                (setup_pending || !timer_mode) && crate::preferences::needs_setup(&folder)?;
-        }
+        setup_pending = !timer_mode && crate::preferences::needs_setup(gaze.runtime.settings());
         if let Some(notice) = gaze.controls_notice.take() {
             notice_item.set_text(notice);
         }
-        for (index, item) in level_items.iter().enumerate() {
-            item.set_checked(index == gaze.runtime.settings().level_index);
+        for (index, item) in &level_items {
+            item.set_checked(*index == gaze.runtime.settings().level_index);
         }
         solo.set_checked(gaze.runtime.solo_armed());
         let decision = timer.tick(

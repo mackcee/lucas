@@ -96,8 +96,12 @@ native overlay correctness.
   already have settings, choose **First-run setup…**. Check the privacy note,
   select your camera and **Check tracking**. Confirm live face/eye status, fps
   and the quality indicator respond; stopping or closing releases the camera.
-- Close halfway through setup, then reopen it: it should resume the same step
-  and camera. Try **Skip check for now** at Borderless, then complete calibration.
+- Close halfway through setup, then select **Timer mode (no gaze)** from the tray:
+  eligible timer reminders should work without calibration. While setup/settings
+  is open, reminders must remain suppressed even in timer mode. Change a level or
+  the Live Client gate in timer mode, then restart normally: setup must still open.
+  Reopening setup starts at the first step with current saved preferences, not the
+  discarded draft. Try **Skip check for now** at Borderless, then complete calibration.
   Failed/cancelled calibration must not let you continue. Choose **10 s (start)**
   and Finish; the window should close to the tray. Restart once and confirm the
   wizard does not repeat. `--timer` remains an explicit setup-free G1 diagnostic.
@@ -147,8 +151,8 @@ native overlay correctness.
 Record the build commit, Windows/display details, camera/lighting, selected levels,
 any missed/false checks, overlay/focus problems, and all three card results. Summaries
 and event timestamps are in `%LOCALAPPDATA%\lucas\games.sqlite3`; settings are in
-`settings.toml`, calibration in `calibration.json`, and unfinished setup settings/
-weights in `setup-draft.toml`. Use **Open data folder**. Quit before copying the
+`settings.toml` (including `setup_completed`), and calibration in `calibration.json`.
+Unfinished setup stays in memory only. Use **Open data folder**. Quit before copying the
 SQLite database. The app stores no webcam images; share only what you choose.
 
 After retaining any desired evidence, test **Settings… → Delete all data…**:

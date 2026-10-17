@@ -36,6 +36,7 @@ impl Default for PulseSettings {
 #[serde(default)]
 pub struct Settings {
     pub schema_version: u32,
+    pub setup_completed: bool,
     pub pulse: PulseSettings,
     pub live_client_gate: bool,
     pub window_only_fallback: bool,
@@ -49,6 +50,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             schema_version: 1,
+            setup_completed: false,
             pulse: PulseSettings::default(),
             live_client_gate: true,
             window_only_fallback: true,
