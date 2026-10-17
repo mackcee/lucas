@@ -269,10 +269,8 @@ impl MetricsAccumulator {
         self.dwells += 1;
     }
 
-    /// Most means strictly more than half of the preceding threshold window.
-    /// Unobserved time before session start counts as lost tracking. An exact
-    /// 8 s gap is blind; a glance inside the window is seen only if coverage is
-    /// sufficient. Deaths may arrive late, but never outside observed time.
+    /// Deaths may arrive late, but never outside observed time. See the crate
+    /// README's "Metrics and persistence" section for classification rules.
     pub fn classify_death(&self, at: Timestamp) -> Result<DeathEvent, CoreError> {
         if self.started_at.is_none_or(|start| at < start) || self.last_at.is_none_or(|end| at > end)
         {
@@ -311,7 +309,9 @@ impl MetricsAccumulator {
         } else if gap_ms.is_some_and(|gap| gap < window) {
             DeathClassification::Seen
         } else if gap_ms.is_some()
-            || self.started_at.is_some_and(|start| at.0 - start.0 >= window)
+            || self
+                .started_at
+                .is_some_and(|start| at.0 - start.0 >= window)
         {
             DeathClassification::Blind
         } else {

@@ -12,15 +12,17 @@ Live Client Data API will gate pulses to gameplay.
 
 ## Status
 
-Early development: **M2.1 adds the standalone `lucas-geometry` library**; see its
-[geometry and settings reference](crates/lucas-geometry/README.md). It is not yet
-integrated into the `lucas` binary, which still only prints its version. Gaze
-tracking, calibration, overlays, storage, and training are not implemented yet.
-No camera is opened and no network requests are made by the current application.
+Early development: **M1.1 implements the pure training core**. See
+[`lucas-core`](crates/lucas-core/README.md) for its input contract, manual programme,
+and metrics. **M2.1 adds the standalone `lucas-geometry` library**; see its
+[geometry and settings reference](crates/lucas-geometry/README.md). The `lucas`
+binary still only prints its version; neither library is wired into the app yet.
+Gaze tracking, calibration, overlays, game integration, and storage remain
+unimplemented. The binary opens no camera and makes no network requests.
 
 The application targets **Windows only**. League must run in **Borderless or
-Windowed mode**, not exclusive fullscreen. The current workspace can also be
-built and checked on Linux. Builds will initially be unsigned.
+Windowed mode**, not exclusive fullscreen. The workspace can also be built and
+checked on Linux. Builds will initially be unsigned.
 
 ## Privacy
 
@@ -30,7 +32,7 @@ network connection during app use is to the game's own local API at
 `127.0.0.1:2999`.
 
 Only settings, calibration, and per-game summaries (including event timestamps)
-will be stored locally. Raw webcam frames will not be stored. The current scaffold
+will be stored locally. Raw webcam frames will not be stored. The current binary
 does not collect or persist any data. Developer build and dependency-check tools
 may access package registries and advisory databases.
 
@@ -69,7 +71,7 @@ access to fetch the advisory database.
 | `lucas-app` | `lucas` binary, future tray application and UI |
 | `xtask` | Development tooling scaffold |
 
-These are intended responsibility boundaries; implementation status is described
+These are responsibility boundaries; implementation status is described
 [above](#status). No model files are included yet. The gaze pipeline will use
 MediaPipe models through ONNX Runtime behind a `GazeSource` trait; see
 [`models/README.md`](models/README.md).
