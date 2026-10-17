@@ -83,6 +83,7 @@ pub struct GameState {
     game_time: Option<f64>,
     respawn_timer: Option<f64>,
     alive: bool,
+    last_confirmed_dead: bool,
     supported_mode: bool,
     map: Option<MapKind>,
     available: bool,
@@ -158,10 +159,10 @@ impl GameState {
                 .game_time
                 .is_some_and(|t| snapshot.stats.game_time + 1.0 < t)
             || (self.explicit_end && !has_end);
-        let was_dead = matches!(self.phase, GamePhase::Dead(_));
         if new_session {
             self.reset();
         }
+        let was_dead = self.last_confirmed_dead;
         let mut update = StateUpdate {
             session_started: new_session,
             ..StateUpdate::default()
@@ -184,6 +185,9 @@ impl GameState {
         self.available = true;
         let player = snapshot.active_player();
         self.alive = player.is_some_and(|p| !p.is_dead);
+        if let Some(player) = player {
+            self.last_confirmed_dead = player.is_dead;
+        }
         self.respawn_timer = player.map(|p| p.respawn_timer);
         let map = if snapshot.stats.map_number == 11 {
             MapKind::SummonersRift

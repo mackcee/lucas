@@ -53,15 +53,10 @@ impl SettingsLocator {
         let text = fs::read_to_string(path)?;
         let value: serde_json::Value = serde_json::from_str(&text).map_err(io::Error::other)?;
         if let Some(installs) = value.get("associated_client").and_then(|v| v.as_object()) {
-            for exe in installs.keys() {
-                // Normalize Windows separators for portable fixture tests too.
-                let exe = PathBuf::from(exe.replace('\\', "/"));
-                if exe
-                    .file_name()
-                    .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("LeagueClient.exe"))
-                    && let Some(parent) = exe.parent()
-                {
-                    self.add_root(parent.to_path_buf());
+            for root in installs.keys() {
+                let root = PathBuf::from(root.replace('\\', "/"));
+                if root.join("LeagueClient.exe").is_file() {
+                    self.add_root(root);
                 }
             }
         }

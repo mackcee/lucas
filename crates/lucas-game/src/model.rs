@@ -78,37 +78,24 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// Resolve an unambiguous player, preferring IDs over streamer-mode names.
+    /// Resolve an unambiguous player by ID.
     pub fn active_player(&self) -> Option<&Player> {
         let mut ids = self
             .players
             .iter()
             .filter(|p| p.matches_id(&self.active_player_name));
-        if let Some(player) = ids.next() {
-            return ids.next().is_none().then_some(player);
-        }
-        if self.active_player_name.is_empty() {
-            return None;
-        }
-        let mut champions = self
-            .players
-            .iter()
-            .filter(|p| p.champion_name == self.active_player_name);
-        let player = champions.next()?;
-        champions.next().is_none().then_some(player)
+        let player = ids.next()?;
+        ids.next().is_none().then_some(player)
     }
 
     pub(crate) fn is_player_victim(&self, player: &Player, victim: &str) -> bool {
-        player.matches_id(victim)
-            || (!victim.is_empty()
-                && victim == player.champion_name
-                // A real opponent ID wins over a coincidentally equal champion name.
-                && !self.players.iter().any(|p| p.matches_id(victim))
-                && self
-                    .players
-                    .iter()
-                    .filter(|p| p.champion_name == victim)
-                    .count()
-                    == 1)
+        !victim.is_empty()
+            && (player.matches_id(victim) || player.champion_name == victim)
+            && self
+                .players
+                .iter()
+                .filter(|p| p.matches_id(victim) || p.champion_name == victim)
+                .count()
+                == 1
     }
 }

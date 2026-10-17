@@ -181,7 +181,7 @@ fn unknown_identity_is_safe_and_late_identity_recovers_deaths() {
 }
 
 #[test]
-fn modern_riot_ids_and_unambiguous_streamer_fallback() {
+fn modern_riot_ids_and_unambiguous_streamer_events() {
     let mut data = scripted(1401.0);
     data.players[0].riot_id = "Map Watcher#EUW".into();
     data.active_player_name = "Map Watcher#EUW".into();
@@ -199,13 +199,13 @@ fn modern_riot_ids_and_unambiguous_streamer_fallback() {
     data.players[0].riot_id_tag_line = "EUW".into();
     assert!(data.active_player().is_some());
     data.active_player_name = "Annie".into();
-    assert!(data.active_player().is_some());
+    assert!(data.active_player().is_none());
     let mut enemy = data.players[0].clone();
     enemy.summoner_name = "Someone Else".into();
     enemy.riot_id_game_name = "Someone Else".into();
     enemy.team = "CHAOS".into();
     data.players.push(enemy);
-    assert!(data.active_player().is_none()); // mirror champion is ambiguous
+    assert!(data.active_player().is_none());
     data.active_player_name = "Map Watcher#EUW".into();
     assert_eq!(
         GameState::new()
@@ -275,6 +275,112 @@ fn opponent_named_after_our_champion_does_not_trigger_streamer_fallback() {
     let deaths = GameState::new().update(wall(0), &data).unwrap().deaths;
     assert_eq!(deaths.len(), 1);
     assert_eq!(deaths[0].game_time, 115.5);
+}
+
+#[test]
+fn player_id_matching_opponent_champion_leaves_death_unresolved() {
+    let mut data = scripted(1401.0);
+    data.active_player_name = "Annie".into();
+    data.players[0].summoner_name = "Annie".into();
+    data.players[0].champion_name = "Lux".into();
+    let mut enemy = data.players[0].clone();
+    enemy.summoner_name = "Opponent".into();
+    enemy.champion_name = "Annie".into();
+    enemy.team = "CHAOS".into();
+    data.players.push(enemy);
+    assert_eq!(data.active_player(), Some(&data.players[0]));
+    let mut state = GameState::new();
+    assert!(state.update(wall(0), &data).unwrap().deaths.is_empty());
+    data.events.events[6].victim_name = Some("Lux".into());
+    let deaths = state.update(wall(1), &data).unwrap().deaths;
+    assert_eq!(deaths.len(), 1);
+    assert_eq!(deaths[0].event_id, 6);
+}
+
+#[test]
+fn overlapping_id_and_champion_on_same_player_is_unambiguous() {
+    let mut data = scripted(1401.0);
+    data.active_player_name = "Annie".into();
+    data.players[0].summoner_name = "Annie".into();
+    let deaths = GameState::new().update(wall(0), &data).unwrap().deaths;
+    assert_eq!(deaths.len(), 1);
+    assert_eq!(deaths[0].event_id, 6);
+}
+
+#[test]
+fn duplicate_player_ids_leave_identity_unresolved() {
+    let mut data = snapshot(100.0);
+    let mut enemy = data.players[0].clone();
+    enemy.champion_name = "Lux".into();
+    enemy.team = "CHAOS".into();
+    data.players.push(enemy);
+    assert!(data.active_player().is_none());
+}
+
+#[test]
+fn respawn_survives_connectivity_and_identity_gaps_once() {
+    for initially_dead in [false, true] {
+        for lose_connection in [false, true] {
+            let mut state = GameState::new();
+            let mut data = snapshot(100.0);
+            data.players[0].is_dead = initially_dead;
+            state.update(wall(0), &data).unwrap();
+            for time in 1..=2 {
+                if lose_connection {
+                    state.unavailable(wall(time)).unwrap();
+                    assert_eq!(state.phase(), GamePhase::Ended);
+                } else {
+                    let mut unknown = snapshot(100.0 + time as f64);
+                    unknown.active_player_name = "spectator".into();
+                    assert!(!state.update(wall(time), &unknown).unwrap().respawned);
+                    assert_eq!(state.phase(), GamePhase::Loading);
+                }
+                assert!(!state.eligibility(wall(time)).eligible());
+            }
+            let update = state.update(wall(3), &snapshot(115.0)).unwrap();
+            assert!(!update.session_started);
+            assert_eq!(update.respawned, initially_dead);
+            assert!(state.eligibility(wall(3)).eligible());
+            assert!(!state.update(wall(4), &snapshot(116.0)).unwrap().respawned);
+        }
+    }
+}
+
+#[test]
+fn session_boundaries_clear_confirmed_death() {
+    for boundary in ["rollback", "game_end", "reset"] {
+        let mut state = GameState::new();
+        let mut dead = snapshot(100.0);
+        dead.players[0].is_dead = true;
+        state.update(wall(0), &dead).unwrap();
+        let next_time = match boundary {
+            "rollback" => {
+                state.unavailable(wall(1)).unwrap();
+                1.0
+            }
+            "game_end" => {
+                let mut ended = scripted(1800.0);
+                ended.players[0].is_dead = true;
+                assert!(state.update(wall(1), &ended).unwrap().game_end);
+                1801.0
+            }
+            _ => {
+                state.reset();
+                101.0
+            }
+        };
+        let mut unknown = snapshot(next_time);
+        unknown.active_player_name = "spectator".into();
+        let started = state.update(wall(2), &unknown).unwrap();
+        assert!(started.session_started);
+        assert!(!started.respawned);
+        assert!(
+            !state
+                .update(wall(3), &snapshot(next_time + 1.0))
+                .unwrap()
+                .respawned
+        );
+    }
 }
 
 #[test]

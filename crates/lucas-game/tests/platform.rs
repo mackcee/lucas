@@ -30,14 +30,26 @@ fn locator_preserves_root_priority_and_file_fallback_without_parsing_hud() {
 fn installation_manifest_adds_only_league_roots_and_preserves_explicit_override() {
     let temp = tempfile::tempdir().unwrap();
     let manifest = temp.path().join("RiotClientInstalls.json");
-    fs::write(
-        &manifest,
-        r#"{"associated_client":{
-        "D:\\Games\\League of Legends\\LeagueClient.exe":"D:/Riot/RiotClientServices.exe",
-        "D:/Games/VALORANT/VALORANT.exe":"D:/Riot/RiotClientServices.exe"
-    },"rc_live":"D:/Riot/RiotClientServices.exe"}"#,
-    )
-    .unwrap();
+    let install = temp.path().join("Custom League Install");
+    fs::create_dir_all(install.join("Config")).unwrap();
+    fs::write(install.join("LeagueClient.exe"), []).unwrap();
+    let cfg = "[HUD]\nMinimapScale=1.5\n";
+    fs::write(install.join("Config/game.cfg"), cfg).unwrap();
+    let other = temp.path().join("VALORANT");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("VALORANT.exe"), []).unwrap();
+    let install_key = install.to_string_lossy().replace('/', "\\");
+    let other_key = other.to_string_lossy().into_owned();
+    let missing_key = temp.path().join("Missing").to_string_lossy().into_owned();
+    let contents = serde_json::json!({
+        "associated_client": {
+            install_key: "D:/Riot/RiotClientServices.exe",
+            other_key: "D:/Riot/RiotClientServices.exe",
+            missing_key: "D:/Riot/RiotClientServices.exe"
+        },
+        "rc_live": "D:/Riot/RiotClientServices.exe"
+    });
+    fs::write(&manifest, contents.to_string()).unwrap();
     let explicit = temp.path().join("Explicit");
     let mut locator = SettingsLocator::new([explicit.clone()]);
     locator.add_install_manifest(&manifest).unwrap();
@@ -49,8 +61,11 @@ fn installation_manifest_adds_only_league_roots_and_preserves_explicit_override(
     );
     assert_eq!(
         paths[2].path,
-        std::path::PathBuf::from("D:/Games/League of Legends/Config/PersistedSettings.json")
+        install.join("Config/PersistedSettings.json")
     );
+    assert_eq!(paths.iter().find_map(|c| c.read().ok()).unwrap(), cfg);
+    locator.add_install_manifest(&manifest).unwrap();
+    assert_eq!(locator.candidates(), paths);
     fs::write(&manifest, "not json").unwrap();
     assert!(locator.add_install_manifest(&manifest).is_err());
     assert_eq!(locator.candidates(), paths);
