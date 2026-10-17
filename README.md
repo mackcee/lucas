@@ -15,10 +15,12 @@ Live Client Data API will gate pulses to gameplay.
 Early development: **M1.1 implements the pure training core**. See
 [`lucas-core`](crates/lucas-core/README.md) for its input contract, manual programme,
 and metrics. **M2.1 adds the standalone `lucas-geometry` library**; see its
-[geometry and settings reference](crates/lucas-geometry/README.md). The `lucas`
-binary still only prints its version; neither library is wired into the app yet.
-Gaze tracking, calibration, overlays, game integration, and storage remain
-unimplemented. The binary opens no camera and makes no network requests.
+[geometry and settings reference](crates/lucas-geometry/README.md). **M2.2 adds the
+standalone `lucas-overlay` library**; see its [overlay and Windows integration
+reference](crates/lucas-overlay/README.md). The `lucas` binary still only prints its
+version; these libraries are not wired into the app yet. Gaze tracking,
+calibration, game integration, and storage remain unimplemented. The binary
+opens no camera and makes no network requests.
 
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace can also be built and
@@ -66,7 +68,7 @@ access to fetch the advisory database.
 | `lucas-geometry` | Pure minimap rectangle calculation and gaze zone inflation |
 | `lucas-gaze` | Camera, Landmarker, and GazeSource interfaces; capture and calibration |
 | `lucas-game` | Local game API, game state, settings, foreground/fullscreen detection |
-| `lucas-overlay` | Overlay interface, future Win32 layered overlay, recording implementation |
+| `lucas-overlay` | Minimap presentation; see the [overlay reference](crates/lucas-overlay/README.md) |
 | `lucas-store` | TOML settings, calibration profiles, SQLite sessions |
 | `lucas-app` | `lucas` binary, future tray application and UI |
 | `xtask` | Development tooling scaffold |

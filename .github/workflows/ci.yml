@@ -104,3 +104,16 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Test workspace with MSVC
         run: cargo test --workspace
+      - name: Smoke-test overlay on the interactive desktop
+        timeout-minutes: 3
+        env:
+          LUCAS_OVERLAY_ARTIFACT_DIR: ${{ runner.temp }}/lucas-overlay-smoke
+        run: cargo test -p lucas-overlay --test windows_smoke windows_overlay_smoke -- --ignored --exact --nocapture
+      - name: Upload overlay smoke screenshots (including failures)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: overlay-smoke-windows
+          path: ${{ runner.temp }}/lucas-overlay-smoke/*.png
+          if-no-files-found: warn
+          retention-days: 14

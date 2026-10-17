@@ -5,5 +5,28 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Overlay trait, future Win32 layered implementation, and recording implementation."
+description = "Click-through Win32 minimap overlay, pure pulse renderer, and recording backend."
 publish = false
+
+[dependencies]
+lucas-core = { version = "0.1.0", path = "../lucas-core" }
+lucas-geometry = { version = "0.1.0", path = "../lucas-geometry" }
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+
+[dev-dependencies]
+tiny-skia = { version = "0.11.4", features = ["png-format"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Graphics_Dwm", "Win32_UI_Input_KeyboardAndMouse"] }
