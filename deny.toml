@@ -25,6 +25,8 @@ allow = [
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Internal, non-published workspace crates use path-only dependencies.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
