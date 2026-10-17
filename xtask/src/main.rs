@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod eval;
 mod models;
 mod replay;
 mod sim;
@@ -13,6 +14,7 @@ const HELP: &str = "LUCAS development tasks
 
 Usage: cargo xtask sim [options]
        cargo xtask replay <trace.jsonl>
+       cargo xtask eval [--calibration calibration.jsonl] <trace.jsonl...>
        cargo xtask models <verify [directory] | prepare [--python executable] [--output directory] [--compare reference-directory]>
 
 Simulate gamma(k=2) habitual gaps through lucas-core, with 300 ms glances.
@@ -46,6 +48,16 @@ fn main() -> ExitCode {
     {
         println!("{HELP}");
         return ExitCode::SUCCESS;
+    }
+    if command.as_deref() == Some("eval") {
+        return match eval::run(args.collect()) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("evaluation failed: {error}");
+                ExitCode::from(2)
+            }
+        };
     }
     if command.as_deref() == Some("replay") {
         let args: Vec<_> = args.collect();

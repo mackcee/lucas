@@ -10,7 +10,7 @@ mod debug_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
-const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts timer mode in the notification area.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -69,6 +69,9 @@ fn run() -> Result<(), String> {
             }
             "--models" => models = PathBuf::from(args.next().ok_or("--models needs a directory")?),
             "--check-runtime" => check_runtime = true,
+            // Opens the shared diagnostics/calibration surface, never a camera
+            // or recording until the player explicitly starts it.
+            "--calibrate" => {}
             _ => {
                 eprintln!("Unknown arguments. Use --help.");
                 std::process::exit(2);

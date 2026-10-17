@@ -66,9 +66,10 @@ M4.2 provides the Windows `lucas` debug window and an opt-in fullscreen glance
 recorder. The library contains portable script, trace-format and replay-summary
 logic; it does not start a camera or touch disk merely by being linked. See
 [Windows testing](../../docs/testing-on-windows.md) for the tester checklist.
-Calibration and gaze classification are not implemented yet. The separate timer
-tray starts with no arguments or `--timer`; use `lucas --seconds 600` for gaze
-diagnostics. Timer pulses are not driven by gaze.
+M5.1 adds calibration/classification, described below. The separate timer
+tray starts with no arguments or `--timer`; use `lucas --calibrate` or
+`lucas --seconds 600` for the shared gaze window. Timer pulses are not driven by
+gaze; live-loop integration remains separate.
 
 ## Data boundary
 
@@ -146,8 +147,50 @@ Replay validates the file and consumes all numeric samples through
 `TraceGazeSource`. Valid-frame share and observed fps cover the entire recording;
 per-kind mean, population standard deviation, min and max include only valid,
 focused hold frames, using the smoothed features. An empty group is explicitly
-reported. This is **not** the detection-rate evaluation; M5.1 will fit and validate
-using the raw/filtered inputs and target ground truth.
+reported. This is **not** the detection-rate evaluation; use `cargo xtask eval`
+for fitted classification and held-out G2 scoring (see [xtask](../../xtask/README.md#g2-calibration-and-glance-evaluation)).
+
+## In-app calibration
+
+Open `lucas --calibrate`, connect your camera, enter the monitor's physical width
+and height in mm and assumed eye-to-screen distance, then **Start calibration**.
+Defaults are 531×299 mm and 650 mm (24-inch 16:9); Windows DPI is not physical size.
+Use your usual playing position and glasses. The same main-monitor fullscreen
+window/amber dot renderer as the glance test presents a 46-second sequence:
+
+- Nine grid points, centre/ability bar/scoreboard/lane-above/lane-beside negatives.
+- Five dense minimap-corner points, the last two with a slight head turn.
+- Four independent validation targets (two map looks, centre and lane beside).
+
+The map comes from `lucas-geometry` and the existing League settings reader,
+including flipped maps and MinimapScale. If settings are absent, the existing
+reader falls back to scale 1, bottom-right; set `LUCAS_LEAGUE_ROOT` for a custom
+installation. Each two-second target has a 500 ms prompt followed by a hold;
+the first 200 ms after a displayed hold are discarded for settling. Target labels
+are matched to capture acquisition times, not UI receipt. Losing focus leaves
+frames unlabelled; it does not pause the schedule. Missing target coverage fails
+calibration. Escape cancels without replacing previous weights.
+
+Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
+**in front** of the player. Luma is computed in RAM; no image is stored. A result
+shows mean angular error, sensitivity/FPR and pass/fail. Only passing fits save
+weights/geometry/validation aggregates through `lucas-store`; failures retain the
+previous model. Full calibration samples never create a numeric trace file.
+The separate glance recorder still requires explicit opt-in for each recording.
+
+**Quick check** uses one minimap and one centre target in four seconds. It neither
+refits nor saves. Repeat full calibration after a failed quick check. For M5.2:
+
+1. `calibration::load(store, current_screen, current_minimap)` rejects changed
+   desktop origin/resolution/DPI/map geometry or unsupported model bytes.
+2. Present `CalibrationScript::quick(&model)` using the same fullscreen target
+   path; collect `Observation`s by displayed target and acquisition time.
+3. Call `quick_revalidate(&model, observations)` and require
+   `validation.passes(model.target_false_positive_rate())` before enabling gaze.
+4. Feed the camera stream to `lucas_gaze::decision::CalibratedDetector`.
+
+The caller owns game-start routing, unknown handling in play, and disabling gaze
+when revalidation fails. Those are not connected to the pulse loop in this chunk.
 
 ## Windows bundle
 

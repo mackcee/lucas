@@ -6,7 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod calibration;
 pub mod camera;
+pub mod decision;
 pub mod features;
 pub mod filter;
 pub mod landmarks;

@@ -2,6 +2,8 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 #[forbid(unsafe_code)]
+pub mod calibration;
+pub mod eval;
 pub mod postgame;
 pub mod script;
 #[forbid(unsafe_code)]

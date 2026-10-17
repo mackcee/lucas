@@ -28,6 +28,8 @@ pub struct Diagnostic {
     pub cpu_ms: f64,
     pub fps: f64,
     pub received: Instant,
+    /// Mean luma sampled in RAM; no pixels cross the capture-thread boundary.
+    pub luminance: f32,
 }
 #[derive(Clone, Copy, PartialEq)]
 pub struct Presentation {
@@ -41,6 +43,12 @@ struct Recording {
     duration: Duration,
     presentations: Vec<(Instant, Presentation)>,
 }
+struct Collection {
+    started: Instant,
+    duration: Duration,
+    presentations: Vec<(Instant, Presentation)>,
+    observations: Vec<lucas_app::calibration::Observation>,
+}
 #[derive(Default)]
 pub struct Shared {
     pub latest: Option<Diagnostic>,
@@ -48,8 +56,25 @@ pub struct Shared {
     pub saved: Option<PathBuf>,
     recording: Option<Recording>,
     recording_path: Option<PathBuf>,
+    collection: Option<Collection>,
 }
 impl Shared {
+    pub fn begin_calibration(&mut self, started: Instant, duration: Duration) {
+        self.collection = Some(Collection {
+            started,
+            duration,
+            presentations: Vec::new(),
+            observations: Vec::new(),
+        });
+    }
+    pub fn take_calibration(&mut self) -> Vec<lucas_app::calibration::Observation> {
+        self.collection
+            .take()
+            .map_or_else(Vec::new, |c| c.observations)
+    }
+    pub fn is_collecting(&self) -> bool {
+        self.collection.is_some()
+    }
     pub fn is_recording(&self) -> bool {
         self.recording.is_some()
     }
@@ -86,6 +111,14 @@ impl Shared {
     /// Called when a new target is submitted to egui, not recomputed from the
     /// capture thread's wall clock. Late frames retain the old displayed label.
     pub fn present(&mut self, at: Instant, presentation: Presentation) {
+        if let Some(collection) = &mut self.collection
+            && collection
+                .presentations
+                .last()
+                .is_none_or(|(_, p)| *p != presentation)
+        {
+            collection.presentations.push((at, presentation));
+        }
         if let Some(recording) = &mut self.recording
             && recording
                 .presentations
@@ -107,6 +140,22 @@ impl Shared {
         }
     }
     fn record(&mut self, acquired: Instant, diagnostic: Diagnostic) -> trace::Result<()> {
+        if let Some(c) = &mut self.collection
+            && acquired
+                .checked_duration_since(c.started)
+                .is_some_and(|t| t < c.duration)
+            && let Some((shown_at, presentation)) =
+                c.presentations.iter().rev().find(|(at, _)| *at <= acquired)
+            && presentation.phase == Phase::Hold
+            && acquired.duration_since(*shown_at) >= Duration::from_millis(200)
+            && let Some(target) = presentation.target
+            && c.observations.len() < 3000
+        {
+            c.observations.push(lucas_app::calibration::observation(
+                target,
+                diagnostic.sample,
+            ));
+        }
         let Some(recording) = &mut self.recording else {
             return Ok(());
         };
@@ -182,6 +231,7 @@ impl Drop for Worker {
 struct Raw {
     found: bool,
     features: Option<[f32; 10]>,
+    luminance: f32,
 }
 struct ObservedLandmarker<L> {
     inner: L,
@@ -190,8 +240,20 @@ struct ObservedLandmarker<L> {
 impl<L: Landmarker> Landmarker for ObservedLandmarker<L> {
     fn locate(&mut self, frame: &Frame) -> lucas_gaze::Result<Option<FaceLandmarks>> {
         let face = self.inner.locate(frame)?;
+        let mut count = 0;
+        let sum: f32 = frame
+            .rgb()
+            .chunks_exact(3)
+            .step_by(64)
+            .map(|p| {
+                count += 1;
+                (0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2]))
+                    / 255.0
+            })
+            .sum();
         *self.raw.lock().unwrap() = Raw {
             found: face.is_some(),
+            luminance: if count == 0 { 0.0 } else { sum / count as f32 },
             features: face
                 .as_ref()
                 .and_then(features::extract)
@@ -260,6 +322,7 @@ fn run(
             cpu_ms,
             fps,
             received,
+            luminance: raw.luminance,
         };
         let mut state = state.lock().unwrap();
         state.latest = Some(diagnostic);
@@ -283,6 +346,71 @@ mod tests {
     use super::*;
     use lucas_app::{settings::MinimapSelection, trace::CameraInfo};
 
+    #[test]
+    fn calibration_uses_acquisition_time_settling_and_focus_without_writing() {
+        let started = Instant::now();
+        let mut shared = Shared::default();
+        shared.begin_calibration(started, Duration::from_secs(10));
+        let target = |id| Target {
+            id,
+            position: [0.5, 0.5],
+            kind: lucas_app::script::TargetKind::Elsewhere,
+        };
+        let hold = |id| Presentation {
+            phase: Phase::Hold,
+            target: Some(target(id)),
+        };
+        let diagnostic = |ms| Diagnostic {
+            sample: GazeSample {
+                timestamp: Duration::from_millis(ms),
+                features: None,
+                quality: 0.0,
+            },
+            raw: None,
+            face_found: false,
+            cpu_ms: 1.0,
+            fps: 30.0,
+            received: started,
+            luminance: 0.1,
+        };
+        shared.present(started + Duration::from_secs(1), hold(0));
+        for ms in [900, 1100, 1300] {
+            shared
+                .record(started + Duration::from_millis(ms), diagnostic(ms))
+                .unwrap();
+        }
+        shared.present(started + Duration::from_secs(2), hold(1));
+        // A frame delivered late still belongs to the previously displayed dot.
+        shared
+            .record(started + Duration::from_millis(1500), diagnostic(1500))
+            .unwrap();
+        shared
+            .record(started + Duration::from_millis(2300), diagnostic(2300))
+            .unwrap();
+        shared.present(
+            started + Duration::from_secs(3),
+            Presentation {
+                phase: Phase::Unfocused,
+                target: None,
+            },
+        );
+        shared
+            .record(started + Duration::from_millis(3300), diagnostic(3300))
+            .unwrap();
+        let observations = shared.take_calibration();
+        assert_eq!(
+            observations.iter().map(|o| o.target_id).collect::<Vec<_>>(),
+            [0, 0, 1]
+        );
+        assert!(
+            observations
+                .iter()
+                .all(|o| o.labelled.sample.features.is_none())
+        );
+        assert!(!shared.is_recording());
+        assert!(shared.saved.is_none());
+        assert!(!shared.is_collecting());
+    }
     #[test]
     fn successful_restart_clears_previous_recording_error() {
         let directory = tempfile::tempdir().unwrap();

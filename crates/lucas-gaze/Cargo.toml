@@ -14,6 +14,8 @@ ort = ["dep:ort"]
 camera = ["dep:nokhwa", "dep:thread-priority"]
 
 [dependencies]
+lucas-core = { path = "../lucas-core" }
+lucas-geometry = { path = "../lucas-geometry" }
 sha2 = "0.10.9"
 zeroize = "1.8.2"
 image = { version = "0.25.9", default-features = false, features = ["jpeg", "png"] }

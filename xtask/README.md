@@ -118,3 +118,47 @@ expected from sampling, glance timing, and using the real detector and policy
 instead of the discarded prototype. Bands are intentionally not golden exact
 counts; a policy change that floods players should fail the tests without
 requiring every harmless timing change to update a snapshot.
+
+## G2 calibration and glance evaluation
+
+```sh
+cargo xtask eval glance-daylight.jsonl glance-night.jsonl
+cargo xtask eval --calibration calibration-session.jsonl unseen-session.jsonl
+cargo xtask eval --width-mm 598 --height-mm 336 --distance-mm 650 glance.jsonl
+```
+
+Reads the existing recorder's JSON-lines v1 format; writes no files or weights.
+Without a separate calibration trace, each class's target occurrences are split
+chronologically into 50% fit, 25% threshold-validation, and the rest held-out test
+(rounding fit/validation down). With `--calibration`, 75%/25% of that file's
+occurrences fit/validate the model and **all** other files' trials are evaluated.
+Use a genuinely independent recording, not a copy of the fitting file. Different
+monitor resolutions or minimap settings are rejected. Multi-file results are
+reported independently, never pooled across camera positions or people.
+
+The first 300 ms of each displayed hold/focus return are excluded for saccade and
+filter settling. No countdown/unfocused frames enter fitting or scoring. Unknown
+hold frames remain in the denominator: they cannot count as checks. Splitting is
+by whole trial, never by nearby correlated frames. Missing expected trials remain
+missed glances/missing coverage, rather than disappearing from the denominator.
+
+The same calibrated decision layer as the app processes each evaluation trial,
+reset at trial boundaries so a previous dot cannot donate dwell. A minimap trial
+is detected if it starts at least one confirmed check. Every check-start in an
+elsewhere trial is a false detection. Elsewhere exposure sums observed intervals
+<=250 ms, capped to each hold minus settling; missing camera time cannot dilute
+false detections/minute. Known/usable frame share includes off-screen rejection.
+
+G2 requires >=90% detected minimap trials and <=1 false event/minute elsewhere.
+A completed trace, >=80% temporal coverage and >=80% known frames are additionally
+required to avoid declaring success from missing evidence. Exit codes: **0** all
+traces GO, **1** at least one NO-GO, **2** malformed/insufficient inputs. The output
+includes split sizes, empirical held-out ROC, fitted threshold and mean error in
+degrees. Defaults assume 531×299 mm and 650 mm distance, recorded as assumed; pass
+physical dimensions for meaningful angular diagnostics.
+
+A short calibration ROC is not a confidence bound, and scripted four-second
+fixations do not establish performance on every in-game glance duration. The
+synthetic tests exercise both GO and NO-GO paths; they are **not** the real-webcam
+G2 gate. Run these commands on the captain's recordings when available; no new
+code or video conversion is needed.
