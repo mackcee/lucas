@@ -59,15 +59,18 @@ this crate.
 
 `data_folder()` exposes the path for the app's **Open data folder** action.
 `delete_all_data(self)` consumes the owner and closes SQLite first, then removes
-the database and SQLite sidecars, settings, calibration, interrupted atomic
-writes with the private `.lucas-write-` prefix, and the `traces` and `reports`
-directories. It leaves the folder itself and unrelated files intact.
+the database and SQLite sidecars, settings, timer-mode alignment profiles
+(`alignment.toml`) and their interrupted write (`alignment.toml.tmp`), calibration,
+interrupted atomic writes with the private `.lucas-write-` prefix, and the `traces`
+and `reports` directories. It leaves the folder itself and unrelated files intact.
 Directory symlinks are removed, not followed. No files are sent elsewhere.
 
-The caller **must stop trace/report writers and release every other database
-handle before deletion**. Errors are returned (deletion may be partial); reopen
-the same folder after releasing handles to retry. The separate opt-in trace
-feature may write to `traces`, but this crate has no trace-writing API.
+The caller **must close timer mode, stop other trace/report writers, and release
+every other database handle before deletion**. Timer mode retains alignment
+profiles in memory and could save them again if left running. Errors are returned
+(deletion may be partial); reopen the same folder after releasing handles to retry.
+The separate opt-in trace feature may write to `traces`, but this crate has no
+trace-writing API.
 
 ```sh
 cargo test -p lucas-store

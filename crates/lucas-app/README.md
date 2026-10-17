@@ -23,9 +23,10 @@ lucas_app::postgame::show_postgame(card)?;
 `show_postgame` starts an eframe event loop and belongs on the main/UI thread.
 An already-running UI should embed `PostGameCard::show(ui)` instead. Game-end
 routing, suppressing the card during play, and pause-aware event clock mapping
-remain the later loop's responsibility. Stop trace/report writers and release
-other database handles first: ownership transfers into the card so **Delete all
-data** can close SQLite before deleting files. Deletion requires a second,
+remain the later loop's responsibility. Follow the storage reference's
+[deletion prerequisites](../lucas-store/README.md#privacy-controls) first:
+ownership transfers into the card so **Delete all data** can close SQLite before
+deleting files. Deletion requires a second,
 explicit confirmation and clears the in-memory card on success. If deleting
 fails, keep the card open, close other LUCAS windows, and choose **Delete all data**
 again. The card can retry even if the database or summary has already been removed.

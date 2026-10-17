@@ -1,5 +1,6 @@
 use eframe::egui::{self, Event, PointerButton, Pos2, RawInput, Rect, Vec2};
 use lucas_app::postgame::{PostGameCard, demo_summary};
+use lucas_app::timer::alignment_store::{AlignmentStore, Key};
 use lucas_core::{
     GateInputs, GazeSample, SeededRng, Session, SessionConfig, TRAINING_LEVELS, Timestamp,
 };
@@ -10,6 +11,24 @@ fn seed_store(path: &Path) -> GameSummary {
     let mut store = Store::open_in(path).unwrap();
     let summary = demo_summary();
     store.save_settings(&Settings::default()).unwrap();
+    let mut alignments = AlignmentStore::default();
+    alignments
+        .set(
+            Key {
+                width: 1920,
+                height: 1080,
+                minimap_scale: 1.0,
+                flipped: false,
+            },
+            lucas_geometry::Alignment {
+                offset_x_px: -4.0,
+                offset_y_px: -6.0,
+                scale_multiplier: 1.1,
+            },
+        )
+        .unwrap();
+    alignments.save(path).unwrap();
+    std::fs::copy(path.join("alignment.toml"), path.join("alignment.toml.tmp")).unwrap();
     store
         .save_calibration(&Calibration {
             schema_version: 1,
@@ -131,6 +150,10 @@ fn persisted_card_requires_confirmation_and_clears_data_through_ui() {
     assert_eq!(store.load_calibration().unwrap().unwrap().model.len(), 1024);
     assert_eq!(store.probe_trend().unwrap().len(), 3);
     assert_eq!(store.events(&summary.id).unwrap(), summary.events);
+    assert_ne!(
+        AlignmentStore::load(directory.path()).unwrap(),
+        AlignmentStore::default()
+    );
 
     // Optional reproducible, synthetic fixture for inspecting the native CLI UI.
     // No user directory is ever used implicitly.
@@ -167,6 +190,8 @@ fn persisted_card_requires_confirmation_and_clears_data_through_ui() {
     let output = render(&context, &mut card, vec![]);
     assert!(text_position(&output, "Permanently delete all data").is_none());
     assert!(directory.path().join("settings.toml").exists());
+    assert!(directory.path().join("alignment.toml").exists());
+    assert!(directory.path().join("alignment.toml.tmp").exists());
     click(&context, &mut card, "Delete all data…");
     click(&context, &mut card, "Permanently delete all data");
     let output = render(&context, &mut card, vec![]);
@@ -179,6 +204,10 @@ fn persisted_card_requires_confirmation_and_clears_data_through_ui() {
     );
     assert!(text_position(&output, "1 / 3 blind · 1 seen · 1 unknown").is_none());
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        AlignmentStore::load(directory.path()).unwrap(),
+        AlignmentStore::default()
+    );
     assert_eq!(
         std::fs::read_to_string(directory.path().join("unrelated.txt")).unwrap(),
         "keep"
