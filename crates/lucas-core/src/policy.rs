@@ -28,29 +28,21 @@ pub struct TrainingLevel {
 
 impl TrainingLevel {
     pub fn validate(self) -> Result<(), CoreError> {
-        if self.standard_ms == 0
-            || self.pulse_delay_ms == Some(0)
-            || !self.pulse_probability.is_finite()
-            || !(0.0..=1.0).contains(&self.pulse_probability)
-            || (self.pulse_delay_ms.is_none() && self.pulse_probability != 0.0)
-        {
-            return Err(CoreError::InvalidConfig(
-                "invalid training standard, delay, or probability",
-            ));
+        if !TRAINING_LEVELS.contains(&self) {
+            return Err(CoreError::InvalidConfig("unsupported training level"));
         }
         Ok(())
     }
 }
 
-/// Manual programme only. The repeated 5 s step marks the ramp/fade boundary.
+/// Manual programme only.
 /// Promotion, solo-probe scheduling, and dependency decisions belong to M7.
-pub const TRAINING_LEVELS: [TrainingLevel; 11] = [
+pub const TRAINING_LEVELS: [TrainingLevel; 10] = [
     level(Phase::Baseline, 10_000, None, Salience::Strong, 0.0),
     level(Phase::Ramp, 10_000, Some(10_000), Salience::Strong, 1.0),
     level(Phase::Ramp, 8_000, Some(8_000), Salience::Strong, 1.0),
     level(Phase::Ramp, 6_000, Some(6_000), Salience::Strong, 1.0),
     level(Phase::Ramp, 5_000, Some(5_000), Salience::Strong, 1.0),
-    level(Phase::Fade, 5_000, Some(5_000), Salience::Strong, 1.0),
     level(Phase::Fade, 5_000, Some(6_000), Salience::Strong, 1.0),
     level(Phase::Fade, 5_000, Some(8_000), Salience::Medium, 1.0),
     level(Phase::Fade, 5_000, Some(10_000), Salience::Soft, 0.75),

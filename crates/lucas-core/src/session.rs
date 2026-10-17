@@ -200,7 +200,14 @@ impl<R: RandomSource> Session<R> {
             check_started: glance.check_started,
             effective_delay_ms: self.policy.effective_delay_ms(),
         })?;
-        if gate != self.gate || self.started_at.is_none() {
+        let previous_gate = GateInputs {
+            game_time_ms: gate.game_time_ms,
+            ..self.gate
+        };
+        if gate != previous_gate
+            || gate.resets_gap() != self.gate.resets_gap()
+            || self.started_at.is_none()
+        {
             self.emit(sample.at, EventKind::GateChanged(gate));
         }
         if glance.state != self.gaze || self.started_at.is_none() {

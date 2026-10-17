@@ -17,6 +17,16 @@ fn gate() -> GateInputs {
         paused: false,
     }
 }
+fn suppressed_gates() -> [GateInputs; 6] {
+    [
+        GateInputs { active_game: false, ..gate() },
+        GateInputs { alive: false, ..gate() },
+        GateInputs { game_time_ms: 90_000, ..gate() },
+        GateInputs { foreground: false, ..gate() },
+        GateInputs { face_tracked: false, ..gate() },
+        GateInputs { paused: true, ..gate() },
+    ]
+}
 fn observation(at: u64, looking: bool) -> MetricsObservation {
     MetricsObservation {
         at: Timestamp(at),
@@ -309,7 +319,6 @@ mod policy {
         assert_eq!(
             fades.iter().map(|l| l.pulse_delay_ms).collect::<Vec<_>>(),
             [
-                Some(5_000),
                 Some(6_000),
                 Some(8_000),
                 Some(10_000),
@@ -318,6 +327,41 @@ mod policy {
             ]
         );
         assert!(TRAINING_LEVELS.iter().all(|l| l.validate().is_ok()));
+    }
+    #[test]
+    fn custom_levels_are_rejected_without_changing_policy_or_session() {
+        let initial = TRAINING_LEVELS[1];
+        let mut policy = PulsePolicy::new(initial, false).unwrap();
+        let mut session = Session::new(
+            "levels", SessionConfig::default(), initial, FixedRng(1 << 63),
+        ).unwrap();
+        session.observe(sample(0, 0.0), gate()).unwrap();
+        let before = session.events().to_vec();
+        for invalid in [
+            TrainingLevel { standard_ms: 20_000, ..TRAINING_LEVELS[5] },
+            TrainingLevel { phase: Phase::Fade, ..TRAINING_LEVELS[4] },
+            TrainingLevel { pulse_delay_ms: Some(7_000), ..initial },
+            TrainingLevel { salience: Salience::Soft, ..initial },
+            TrainingLevel { pulse_probability: 0.5, ..initial },
+            TrainingLevel { pulse_probability: f64::NAN, ..initial },
+        ] {
+            assert!(invalid.validate().is_err());
+            assert!(PulsePolicy::new(invalid, false).is_err());
+            assert!(Session::new(
+                "invalid", SessionConfig::default(), invalid, FixedRng(0),
+            ).is_err());
+            assert!(policy.set_level(invalid).is_err());
+            assert!(session.set_level(invalid).is_err());
+            assert_eq!(policy.level(), initial);
+            assert_eq!(session.level(), initial);
+            assert_eq!(session.events(), before);
+        }
+        for level in TRAINING_LEVELS {
+            policy.set_level(level).unwrap();
+            session.set_level(level).unwrap();
+            assert_eq!(policy.level(), level);
+            assert_eq!(session.level(), level);
+        }
     }
     #[test]
     fn jitter_is_sampled_once_and_cap_moves_by_exact_steps() {
@@ -358,7 +402,7 @@ mod policy {
     }
     #[test]
     fn probability_skip_is_not_retried_on_every_frame() {
-        let mut policy = PulsePolicy::new(TRAINING_LEVELS[9], true).unwrap();
+        let mut policy = PulsePolicy::new(TRAINING_LEVELS[8], true).unwrap();
         let mut rng = FixedRng(u64::MAX);
         assert!(
             policy
@@ -400,7 +444,7 @@ mod policy {
                 .is_some()
         );
         assert_eq!(policy.staircase_ms(), 10_000);
-        policy.set_level(TRAINING_LEVELS[10]).unwrap();
+        policy.set_level(TRAINING_LEVELS[9]).unwrap();
         assert_eq!(policy.prepare_gap(&mut rng), None);
         assert!(
             policy
@@ -597,6 +641,32 @@ mod metric_tests {
         assert!(m.classify_death(Timestamp(18_000)).is_err());
     }
     #[test]
+    fn suppressed_intervals_are_not_usable_death_evidence() {
+        for gate in suppressed_gates() {
+            let mut m = metrics();
+            m.observe(MetricsObservation {
+                gate,
+                ..observation(0, true)
+            }).unwrap();
+            m.observe(observation(10_000, false)).unwrap();
+            let death = m.classify_death(Timestamp(10_000)).unwrap();
+            assert_eq!(death.classification, DeathClassification::Unknown);
+            assert_eq!(death.tracked_fraction, 0.0);
+            assert_eq!(m.snapshot().checks, 0);
+            m.observe(observation(13_999, false)).unwrap();
+            assert_eq!(
+                m.classify_death(Timestamp(13_999)).unwrap().classification,
+                DeathClassification::Unknown
+            );
+            m.observe(observation(18_000, false)).unwrap();
+            assert_eq!(
+                m.classify_death(Timestamp(18_000)).unwrap().classification,
+                DeathClassification::Blind
+            );
+            assert_eq!(m.classify_death(Timestamp(10_000)).unwrap(), death);
+        }
+    }
+    #[test]
     fn half_tracked_is_not_mostly_lost_and_threshold_is_configurable() {
         let mut m = MetricsAccumulator::new(
             5_000,
@@ -619,14 +689,28 @@ mod metric_tests {
     }
     #[test]
     fn absent_history_is_unknown_not_a_fabricated_blind_death() {
-        let mut m = metrics();
-        m.observe(observation(100_000, false)).unwrap();
-        m.observe(observation(101_000, false)).unwrap();
-        assert_eq!(
-            m.classify_death(Timestamp(101_000)).unwrap().classification,
-            DeathClassification::Unknown
-        );
-        assert!(m.classify_death(Timestamp(99_000)).is_err());
+        for start in [0, 100_000] {
+            let mut m = metrics();
+            m.observe(observation(start, false)).unwrap();
+            for duration in [1_000, 4_000, 5_000, 7_999] {
+                m.observe(observation(start + duration, false)).unwrap();
+                let death = m.classify_death(Timestamp(start + duration)).unwrap();
+                assert_eq!(death.classification, DeathClassification::Unknown);
+                assert_eq!(death.gap_ms, None);
+            }
+            m.observe(observation(start + 8_000, false)).unwrap();
+            assert_eq!(
+                m.classify_death(Timestamp(start + 8_000)).unwrap().classification,
+                DeathClassification::Blind
+            );
+            assert_eq!(
+                m.classify_death(Timestamp(start + 5_000)).unwrap().classification,
+                DeathClassification::Unknown
+            );
+            if start > 0 {
+                assert!(m.classify_death(Timestamp(start - 1)).is_err());
+            }
+        }
     }
     #[test]
     fn changing_standard_scores_subsequent_time_without_rewriting_history() {
@@ -697,6 +781,47 @@ mod session_tests {
         assert!(!json.contains("p_minimap"));
     }
     #[test]
+    fn suppressed_minimap_samples_do_not_produce_blind_deaths() {
+        for gate in suppressed_gates() {
+            let mut s = session();
+            for at in (0..=10_000).step_by(50) {
+                s.observe(sample(at, 1.0), gate).unwrap();
+            }
+            let death = s.death(Timestamp(10_000)).unwrap();
+            assert_eq!(death.classification, DeathClassification::Unknown);
+            assert_eq!(death.tracked_fraction, 0.0);
+            assert_eq!(s.metrics().checks, 0);
+        }
+    }
+    #[test]
+    fn gate_events_ignore_clock_progress_but_preserve_state_transitions() {
+        let mut s = session();
+        for at in (0..=2_000).step_by(50) {
+            s.observe(sample(at, 0.0), GateInputs {
+                game_time_ms: 89_000 + at,
+                ..gate()
+            }).unwrap();
+        }
+        let changes: Vec<_> = s.events().iter().filter_map(|event| {
+            if let EventKind::GateChanged(gate) = event.kind {
+                Some((event.at, gate.game_time_ms))
+            } else {
+                None
+            }
+        }).collect();
+        assert_eq!(changes, [(Timestamp(0), 89_000), (Timestamp(1_050), 90_050)]);
+        let mut at = 2_000;
+        for changed_gate in suppressed_gates() {
+            for gate in [changed_gate, gate()] {
+                at += 50;
+                let update = s.observe(sample(at, 0.0), gate).unwrap();
+                assert_eq!(update.events.iter().filter(|event| {
+                    matches!(event.kind, EventKind::GateChanged(_))
+                }).count(), 1);
+            }
+        }
+    }
+    #[test]
     fn silent_camera_expiry_freezes_gap_and_marks_death_unknown() {
         let mut s = session();
         s.observe(sample(0, 0.0), gate()).unwrap();
@@ -737,11 +862,11 @@ mod session_tests {
         let mut s = session();
         s.set_level(TRAINING_LEVELS[3]).unwrap();
         s.observe(sample(0, 0.0), gate()).unwrap();
-        s.set_level(TRAINING_LEVELS[10]).unwrap();
+        s.set_level(TRAINING_LEVELS[9]).unwrap();
         for at in (50..=20_000).step_by(50) {
             s.observe(sample(at, 0.0), gate()).unwrap();
         }
-        assert_eq!(s.level(), TRAINING_LEVELS[10]);
+        assert_eq!(s.level(), TRAINING_LEVELS[9]);
         let record = s.finish(Timestamp(20_000)).unwrap();
         assert_eq!(record.initial_level, TRAINING_LEVELS[3]);
         assert_eq!(record.metrics.pulses, 0);

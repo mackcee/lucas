@@ -115,8 +115,9 @@ proptest! {
     }
 
     #[test]
-    fn jitter_is_bounded_and_seed_reproducible(seed in any::<u64>(), base in 100u64..100_000) {
-        let level = TrainingLevel { pulse_delay_ms: Some(base), ..TRAINING_LEVELS[1] };
+    fn jitter_is_bounded_and_seed_reproducible(seed in any::<u64>(), index in 1usize..TRAINING_LEVELS.len() - 1) {
+        let level = TRAINING_LEVELS[index];
+        let base = level.pulse_delay_ms.unwrap();
         let mut a = PulsePolicy::new(level, false).unwrap();
         let mut b = PulsePolicy::new(level, false).unwrap();
         let mut rng_a = SeededRng::new(seed);

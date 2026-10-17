@@ -248,7 +248,7 @@ impl MetricsAccumulator {
         }
         self.started_at.get_or_insert(at);
         self.last_at = Some(at);
-        self.tracking = tracking;
+        self.tracking = gate.eligible();
         self.looking = looking;
         Ok(check)
     }
@@ -310,8 +310,12 @@ impl MetricsAccumulator {
             DeathClassification::Unknown
         } else if gap_ms.is_some_and(|gap| gap < window) {
             DeathClassification::Seen
-        } else {
+        } else if gap_ms.is_some()
+            || self.started_at.is_some_and(|start| at.0 - start.0 >= window)
+        {
             DeathClassification::Blind
+        } else {
+            DeathClassification::Unknown
         };
         Ok(DeathEvent {
             at,

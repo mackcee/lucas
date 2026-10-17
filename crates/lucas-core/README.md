@@ -25,6 +25,8 @@ also usable independently. See the crate-level Rust example.
 - `SessionUpdate.events` contains only new events from that observation. Render a
   `Pulse` as a one-shot animation. Hide it when eligibility is false or gaze is
   `Minimap`. Settings for style, colour, and sound belong to the consuming app.
+  Gate events record input-state changes and eligibility threshold crossings,
+  not ordinary game-clock progression.
 
 ## Detection and timing
 
@@ -47,13 +49,13 @@ timeline, not the frozen eligible-time gap.
 | --- | --- | --- | --- |
 | Baseline | 10 s | off | none |
 | Ramp | 10 → 8 → 6 → 5 s | matches standard | strong, probability 1 |
-| Fade | 5 s | 5 → 6 → 8 → 10 → 15 s | strong → medium → soft → minimal; final probabilities 0.75, 0.5 |
+| Fade | 5 s | 6 → 8 → 10 → 15 s | strong → medium → soft → minimal; final probabilities 0.75, 0.5 |
 | Graduated | 5 s | off | none |
 
 `Session::set_level` is explicit; there is no promotion or probe scheduling.
 Changes apply at the latest observation boundary, reset the pulse opportunity and
-staircase, and are recorded as events. The repeated 5 s level marks the phase
-boundary. Custom levels are validated by constructors/setters.
+staircase, and are recorded as events. Constructors and setters accept only the
+levels in `TRAINING_LEVELS`; custom programmes are not supported.
 
 The nominal delay is `max(level_delay, staircase_delay)` when the density cap is
 on (default). The staircase starts at the level delay, rises 750 ms after each
@@ -90,10 +92,14 @@ Definitions:
 - Anticipation share: unprompted checks in the inclusive last 1 s before the
   sampled pulse deadline / all unprompted checks. Off levels have no deadline.
 - Blind death: most recent valid minimap evidence at least 8 s ago (configurable),
-  or no observed check; seen otherwise. If tracking was lost for **more than half**
-  of that preceding window, the result is unknown. Coverage is duration-weighted,
-  not frame-count-weighted; unobserved history before session start is unknown.
-  Delayed deaths are classified against historical evidence, not current gaze.
+  or no observed check with at least a full threshold window of session history.
+  A more recent check is seen; insufficient history without a check is unknown.
+  If usable gaze evidence is missing for **more than half** of that preceding
+  window, the result is unknown. Detector-suppressed intervals (including pause,
+  foreground loss, and inactive gameplay) count as missing evidence, even with a
+  tracked face. Coverage is duration-weighted, not frame-count-weighted;
+  unobserved history before session start is unknown. Delayed deaths are classified
+  against historical evidence, not current gaze.
 - Undefined ratios and percentiles are `None`, not NaN or fabricated zeroes.
 
 Lower-level `GapClock` and `MetricsAccumulator` consume explicit state intervals
