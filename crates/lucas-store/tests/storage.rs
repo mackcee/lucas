@@ -114,10 +114,9 @@ fn pulse_styles_roundtrip_using_the_renderer_vocabulary() {
         let mut settings = Settings::default();
         settings.pulse.style = style;
         store.save_settings(&settings).unwrap();
-        let persisted: toml::Value = toml::from_str(
-            &std::fs::read_to_string(dir.path().join("settings.toml")).unwrap(),
-        )
-        .unwrap();
+        let persisted: toml::Value =
+            toml::from_str(&std::fs::read_to_string(dir.path().join("settings.toml")).unwrap())
+                .unwrap();
         assert_eq!(persisted["pulse"]["style"].as_str(), Some(name));
         assert_eq!(store.load_settings().unwrap().pulse.style, style);
     }

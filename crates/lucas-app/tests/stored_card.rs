@@ -1,6 +1,8 @@
 use eframe::egui::{self, Event, PointerButton, Pos2, RawInput, Rect, Vec2};
 use lucas_app::postgame::{PostGameCard, demo_summary};
-use lucas_core::{GateInputs, GazeSample, SeededRng, Session, SessionConfig, Timestamp, TRAINING_LEVELS};
+use lucas_core::{
+    GateInputs, GazeSample, SeededRng, Session, SessionConfig, TRAINING_LEVELS, Timestamp,
+};
 use lucas_store::{Calibration, GameSummary, ScreenGeometry, Settings, Store};
 use std::path::Path;
 
@@ -8,42 +10,47 @@ fn seed_store(path: &Path) -> GameSummary {
     let mut store = Store::open_in(path).unwrap();
     let summary = demo_summary();
     store.save_settings(&Settings::default()).unwrap();
-    store.save_calibration(&Calibration {
-        schema_version: 1,
-        model: vec![42; 1024],
-        screen: ScreenGeometry {
-            left: 0,
-            top: 0,
-            width: 1920,
-            height: 1080,
-            scale_factor: 1.0,
-        },
-        created_at_unix_ms: 1_799_000_000_000,
-        validation_error_degrees: Some(2.1),
-    }).unwrap();
+    store
+        .save_calibration(&Calibration {
+            schema_version: 1,
+            model: vec![42; 1024],
+            screen: ScreenGeometry {
+                left: 0,
+                top: 0,
+                width: 1920,
+                height: 1080,
+                scale_factor: 1.0,
+            },
+            created_at_unix_ms: 1_799_000_000_000,
+            validation_error_degrees: Some(2.1),
+        })
+        .unwrap();
     for (index, interval) in [12_000, 10_000, 8_000].into_iter().enumerate() {
         let mut session = Session::new(
             format!("synthetic-probe-{index}"),
             SessionConfig::default(),
             TRAINING_LEVELS[0],
             SeededRng::new(11),
-        ).unwrap();
+        )
+        .unwrap();
         for ms in (0..=120_000).step_by(50) {
-            session.observe(
-                GazeSample {
-                    at: Timestamp(ms),
-                    p_minimap: f64::from(ms % interval < 400),
-                    quality: 1.0,
-                },
-                GateInputs {
-                    active_game: true,
-                    alive: true,
-                    game_time_ms: ms,
-                    foreground: true,
-                    face_tracked: true,
-                    paused: false,
-                },
-            ).unwrap();
+            session
+                .observe(
+                    GazeSample {
+                        at: Timestamp(ms),
+                        p_minimap: f64::from(ms % interval < 400),
+                        quality: 1.0,
+                    },
+                    GateInputs {
+                        active_game: true,
+                        alive: true,
+                        game_time_ms: ms,
+                        foreground: true,
+                        face_tracked: true,
+                        paused: false,
+                    },
+                )
+                .unwrap();
         }
         let record = session.finish(Timestamp(120_000)).unwrap();
         let mut context = summary.context.clone();
@@ -59,7 +66,11 @@ fn seed_store(path: &Path) -> GameSummary {
     summary
 }
 
-fn render(context: &egui::Context, card: &mut PostGameCard, events: Vec<Event>) -> egui::FullOutput {
+fn render(
+    context: &egui::Context,
+    card: &mut PostGameCard,
+    events: Vec<Event>,
+) -> egui::FullOutput {
     let mut output = context.run_ui(
         RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(860.0, 2400.0))),
@@ -83,14 +94,31 @@ fn text_position(output: &egui::FullOutput, label: &str) -> Option<Pos2> {
 
 fn click(context: &egui::Context, card: &mut PostGameCard, label: &str) -> egui::FullOutput {
     let output = render(context, card, vec![]);
-    let pos = text_position(&output, label).unwrap_or_else(|| panic!("missing rendered control: {label}"));
-    render(context, card, vec![
-        Event::PointerMoved(pos),
-        Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Default::default() },
-    ]);
-    render(context, card, vec![
-        Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Default::default() },
-    ])
+    let pos = text_position(&output, label)
+        .unwrap_or_else(|| panic!("missing rendered control: {label}"));
+    render(
+        context,
+        card,
+        vec![
+            Event::PointerMoved(pos),
+            Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+        ],
+    );
+    render(
+        context,
+        card,
+        vec![Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }],
+    )
 }
 
 #[test]
@@ -108,7 +136,10 @@ fn persisted_card_requires_confirmation_and_clears_data_through_ui() {
     // No user directory is ever used implicitly.
     if let Some(path) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
         let fixture = Path::new(&path).join("synthetic-store");
-        assert!(!fixture.exists(), "refusing to overwrite an evidence fixture");
+        assert!(
+            !fixture.exists(),
+            "refusing to overwrite an evidence fixture"
+        );
         seed_store(&fixture);
     }
 
@@ -124,7 +155,10 @@ fn persisted_card_requires_confirmation_and_clears_data_through_ui() {
         "Open data folder",
         "Delete all data…",
     ] {
-        assert!(text_position(&output, label).is_some(), "missing rendered output: {label}");
+        assert!(
+            text_position(&output, label).is_some(),
+            "missing rendered output: {label}"
+        );
     }
 
     click(&context, &mut card, "Delete all data…");
@@ -136,8 +170,17 @@ fn persisted_card_requires_confirmation_and_clears_data_through_ui() {
     click(&context, &mut card, "Delete all data…");
     click(&context, &mut card, "Permanently delete all data");
     let output = render(&context, &mut card, vec![]);
-    assert!(text_position(&output, "Local data deleted. Settings and calibration will start fresh next time.").is_some());
+    assert!(
+        text_position(
+            &output,
+            "Local data deleted. Settings and calibration will start fresh next time."
+        )
+        .is_some()
+    );
     assert!(text_position(&output, "1 / 3 blind · 1 seen · 1 unknown").is_none());
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
-    assert_eq!(std::fs::read_to_string(directory.path().join("unrelated.txt")).unwrap(), "keep");
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("unrelated.txt")).unwrap(),
+        "keep"
+    );
 }
