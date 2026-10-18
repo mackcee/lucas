@@ -4,8 +4,9 @@
 
 This test needs a Windows 10/11 PC, a real Summoner's Rift game and League in
 **Borderless** mode. No webcam, models or gaze calibration are needed. Use a
-non-critical game for alignment: while editing, LUCAS temporarily reserves the
-arrow, Shift+arrow, Enter and Esc keys. It does not send input to League.
+non-critical game for alignment: a small, focused LUCAS panel receives the
+arrow, Shift+arrow, Enter and Esc keys. It does not send input to League or
+register global alignment hotkeys.
 
 ### Start and gate checks
 
@@ -30,6 +31,11 @@ arrow, Shift+arrow, Enter and Esc keys. It does not send input to League.
    Pause manually in those situations. Re-check the gate for normal G1 tests.
    API errors never silently enable window-only mode.
 
+**Practice Tool is not eligible under the Live Client gate.** To align or check
+the ring there, uncheck **Use Live Client gate (recommended)** to select
+**window-only** mode. This works with `--timer` and does not require calibration;
+it does not validate the Live Client alive/dead/loading gates.
+
 If the status says HUD settings are unavailable, set the `LUCAS_LEAGUE_ROOT`
 environment variable to the installation folder containing `Config`, then
 restart LUCAS. Automatic discovery tries Riot's local install manifest and
@@ -39,21 +45,40 @@ LUCAS never modifies League's files. Exclusive fullscreen is unsupported.
 
 ### One-time alignment (repeat whenever a patch moves the HUD)
 
-1. With an eligible game running, choose **Align minimap...**, then return to
-   League yourself. LUCAS never brings League or the ring to the foreground.
-   Timer pulses pause while editing; a steady amber border marks the target.
+1. With an eligible game running, choose **Align minimap...**. A small **LUCAS —
+   Align minimap** panel should open with focus, on League's monitor and away
+   from the minimap. **Keep this panel focused** while adjusting; do not return
+   to League to use the keys. LUCAS never brings League to the foreground.
+   Timer pulses pause while editing; a steady amber border stays over the map.
 2. **Arrows** nudge by one physical pixel. **Shift+Right/Up** grows the square
    one pixel; **Shift+Left/Down** shrinks it. Resizing keeps the bottom and outer
    corner anchored. Align the inner edge of the border just outside the map.
-3. **Enter** saves; **Esc** cancels without changing the saved profile. If saving
-   fails, the tray menu explains the error; retry Enter or cancel. The ring hides
-   and its hotkeys release when League loses foreground. Returning resumes the
-   draft. Changing resolution, scale, flip or game window cancels the draft.
+   Confirm League's camera does **not** pan while using the panel's arrow keys.
+   Also try the **Up/Left/Down/Right**, **Smaller/Larger**, **Save** and **Cancel**
+   buttons without the keyboard. After clicking a nudge button, arrow shortcuts
+   should still work; Tab/Shift+Tab selects buttons and Space activates them.
+3. **Enter / Save** saves; **Esc / Cancel / closing the panel** cancels without
+   changing the saved profile. The panel and border close together. If saving
+   fails, the tray menu explains the error; retry Save or cancel in the panel.
+   While the panel **or League** is foreground, the border remains visible if
+   the game is otherwise eligible. Alt-tab to an unrelated app: the border must
+   hide. Returning to the panel resumes the same draft; minimizing League hides
+   the border too. Changing resolution, scale, flip or game window cancels the
+   draft and closes the panel. Open alignment on another monitor too: the panel
+   must not obscure the minimap and the border must track the correct monitor.
 4. Verify that alignment survives quitting/restarting LUCAS. Corrections live in
    `%LOCALAPPDATA%\lucas\alignment.toml`, separately for each **client resolution,
    exact MinimapScale value and flip**. Moving the game to another monitor does
    not change that profile. Edit another profile and confirm the first survives.
    A malformed alignment file is not overwritten; move it aside to reset it.
+5. At **3840×2160, MinimapScale 2.1, unflipped**, check right/down nudges can
+   reach the client edge (including the final pixel of the fractional seed
+   inset). Save the measured correction and a numeric report; do not treat the
+   predicted rectangle as a fitted measurement.
+
+Windows-only interactive evidence for this panel is deferred to the next G1
+session. `windows-latest` CI builds and tests the code, but cannot establish
+focus/key delivery over a running League game.
 
 ### Capture the geometry numbers
 
@@ -75,8 +100,8 @@ changing League's settings so LUCAS can re-read them.
    any missing gate transition. **Only measured numbers**, not League artwork,
    become repository geometry fixtures. A report before alignment is a formula
    estimate, not a ground-truth measurement; label it as such.
-4. Choose **Quit**. Verify the tray icon and any alignment border disappear,
-   and all alignment keys work normally again.
+4. Choose **Quit**. Verify the tray icon, alignment panel and border disappear.
+   Alignment keys must never be reserved globally, during or after editing.
 
 Record whether the Live Client gate actually became active. If the local API or
 TLS certificate is unavailable, fallback is useful for placement/click-through,
@@ -116,7 +141,8 @@ native overlay correctness.
 
 ### Game 1 — assisted start
 
-- Use **Align minimap…** once eligible, return to League, nudge/resize and save.
+- Use **Align minimap…** once eligible; keep the LUCAS panel focused to nudge/resize
+  and save while watching the border over League.
   If this changes the calibration zone, explicitly recalibrate; then complete
   **Quick check required (4 seconds)** from the tray before continuing play.
 - Check pulses after eligible gaps, no pulse during a sustained map look, and

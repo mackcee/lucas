@@ -1,5 +1,5 @@
 use lucas_app::timer::{
-    alignment::{Adjustment, AlignmentSession},
+    alignment::{Adjustment, AlignmentSession, preview_eligible},
     alignment_store::{AlignmentStore, Key},
     report::GeometryReport,
     scheduling::{GateMode, Inputs, Status, Timer},
@@ -305,6 +305,94 @@ fn alignment_nudges_resizes_and_cancel_does_not_change_store() {
         session.adjust(client(), MinimapSettings::default(), Adjustment::Shrink);
     }
     assert!(session.draft.scale_multiplier >= 0.25);
+}
+
+#[test]
+fn alignment_panel_is_a_foreground_exception_not_a_gate_bypass() {
+    for league_foreground in [false, true] {
+        for panel_foreground in [false, true] {
+            let window = WindowStatus {
+                foreground: league_foreground,
+                ..inputs().window
+            };
+            assert_eq!(
+                preview_eligible(window, panel_foreground),
+                league_foreground || panel_foreground
+            );
+            assert_eq!(window.overlay_eligible(), league_foreground); // coaching unchanged
+            for invalid in [
+                WindowStatus {
+                    exists: false,
+                    ..window
+                },
+                WindowStatus {
+                    minimized: true,
+                    ..window
+                },
+                WindowStatus {
+                    client_rect: None,
+                    ..window
+                },
+                WindowStatus {
+                    display_mode: DisplayMode::Unknown,
+                    ..window
+                },
+                WindowStatus {
+                    display_mode: DisplayMode::ExclusiveFullscreen,
+                    ..window
+                },
+            ] {
+                assert!(!preview_eligible(invalid, panel_foreground));
+            }
+        }
+    }
+}
+
+#[test]
+fn alignment_reaches_4k_edges_in_whole_pixels_without_unbounded_offscreen_travel() {
+    for origin in [0.0, -3840.0] {
+        for flipped in [false, true] {
+            let client = Rect::new(origin, 0.0, origin + 3840.0, 2160.0).unwrap();
+            let settings = MinimapSettings {
+                minimap_scale: 2.1,
+                flipped,
+            };
+            let mut session =
+                AlignmentSession::new(Key::new(client, settings), Alignment::default());
+            let horizontal = if flipped {
+                Adjustment::Left
+            } else {
+                Adjustment::Right
+            };
+            for _ in 0..15 {
+                session.adjust(client, settings, horizontal);
+                session.adjust(client, settings, Adjustment::Down);
+            }
+            assert_eq!(session.draft.offset_x_px.abs(), 15.0);
+            assert_eq!(session.draft.offset_y_px, 15.0);
+            let rect = minimap_rect(client, settings, session.draft).unwrap();
+            let outside = if flipped {
+                client.left() - rect.left()
+            } else {
+                rect.right() - client.right()
+            };
+            assert!((0.0..1.0).contains(&outside));
+            assert!((0.0..1.0).contains(&(rect.bottom() - client.bottom())));
+            let boundary = session.draft;
+            session.adjust(client, settings, horizontal);
+            session.adjust(client, settings, Adjustment::Down);
+            assert_eq!(session.draft, boundary);
+            session.adjust(client, settings, Adjustment::Grow);
+            let grown = minimap_rect(client, settings, session.draft).unwrap();
+            assert!((grown.width() - rect.width() - 1.0).abs() < 1e-9);
+            assert_eq!(grown.bottom(), rect.bottom());
+            if flipped {
+                assert_eq!(grown.left(), rect.left());
+            } else {
+                assert!((grown.right() - rect.right()).abs() < 1e-9);
+            }
+        }
+    }
 }
 
 #[test]

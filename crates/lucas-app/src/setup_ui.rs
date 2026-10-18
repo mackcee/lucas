@@ -244,7 +244,7 @@ impl Controls {
             }
             SetupStep::Alignment => {
                 ui.label("Alignment needs a running game. In your next game, open the LUCAS tray menu and choose Align minimap…");
-                ui.label("Return to League: arrow keys move the outline, Shift + arrows resize it, Enter saves and Esc cancels. The map scale and side come from League's settings.");
+                ui.label("Keep the LUCAS alignment panel focused: arrow keys move the outline, Shift + arrows resize it, Enter saves and Esc cancels. You can also use the panel's buttons. The map scale and side come from League's settings.");
                 ui.label("Then use the tray's quick gaze check. If alignment changed the gaze zone, recalibrate first. LUCAS will not silently recalibrate or coach with a mismatched fit.");
             }
             SetupStep::Level => {

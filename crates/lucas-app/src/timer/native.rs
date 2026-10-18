@@ -1,8 +1,9 @@
 //! Thin Windows adapter: tray/message pump, bounded API worker and overlay calls.
 use super::{
     alignment::AlignmentSession,
+    alignment_panel::KeyAction,
     alignment_store::{self, AlignmentStore, Key},
-    alignment_window::{self, KeyAction, Preview},
+    alignment_window::Preview,
     report::GeometryReport,
     scheduling::{GateMode, Inputs, Status, Timer},
     settings::read_hud,
@@ -181,7 +182,6 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
             delete_requested = true;
             break;
         }
-        let mut keys = Vec::new();
         // SAFETY: dispatch only this thread's messages. No hooks or synthesized
         // input. The native tray menu needs a continuously serviced Win32 queue.
         unsafe {
@@ -194,15 +194,10 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                     quit_requested = true;
                     break;
                 }
-                if message.message == WM_HOTKEY
-                    && alignment
-                        .as_ref()
-                        .is_some_and(|(_, p)| p.handle() == message.hwnd)
+                if !alignment
+                    .as_mut()
+                    .is_some_and(|(_, preview)| preview.process_message(&message))
                 {
-                    if let Some(action) = alignment_window::action(message.wParam) {
-                        keys.push(action);
-                    }
-                } else {
                     TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
@@ -231,6 +226,9 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
             .zip(hud);
         let key = context.map(|(client, settings)| Key::new(client, settings));
         if last_key != key
+            || alignment
+                .as_ref()
+                .is_some_and(|(_, p)| p.target() != target)
             || overlay
                 .as_ref()
                 .is_some_and(|(old, _)| *old != target as usize)
@@ -353,11 +351,17 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                     && !gaze.editing()
                 {
                     alignment = None;
-                    match Preview::new(target) {
+                    let Some((client, settings)) = context else {
+                        continue;
+                    };
+                    let Ok(rect) = minimap_rect(client, settings, store.get(key)) else {
+                        continue;
+                    };
+                    match Preview::new(target, rect) {
                         Ok(preview) => {
                             alignment = Some((AlignmentSession::new(key, store.get(key)), preview));
                             timer.reset();
-                            notice_item.set_text("Return to League: arrows move; Shift+arrows resize; Enter saves; Esc cancels");
+                            notice_item.set_text("Use the LUCAS alignment panel: arrows move; Shift+arrows resize; Save or Cancel");
                         }
                         Err(error) => {
                             notice_item.set_text(format!("Alignment unavailable: {error}"))
@@ -395,12 +399,21 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         // Re-evaluate after menu mode changes. API stale state is cleared there.
         let game = gaze.runtime.eligibility(now);
         let game_allowed = timer.mode() == GateMode::WindowOnly || game.eligible();
-        let alignment_visible =
-            window.overlay_eligible() && game_allowed && !suppress && !gaze.editing();
-        for action in keys {
-            // Queued keys after alt-tab or a profile change must do nothing.
-            if !alignment_visible {
-                break;
+        let alignment_visible = alignment.as_ref().is_some_and(|(_, p)| p.eligible())
+            && game_allowed
+            && !suppress
+            && !gaze.editing();
+        // Drain only the surviving panel: profile/window changes or reopening
+        // alignment must discard the old panel's queued edits and Save action.
+        let actions = alignment
+            .as_mut()
+            .map(|(_, p)| p.take_actions())
+            .unwrap_or_default();
+        for action in actions {
+            // Cancel/close remains available even when the preview is ineligible.
+            // Other queued input after alt-tab must not edit or save a draft.
+            if !alignment_visible && action != KeyAction::Cancel {
+                continue;
             }
             if let Some((session, _)) = alignment.as_mut()
                 && let Some((client, settings)) = context
@@ -425,7 +438,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                                 );
                             }
                             Err(error) => notice_item.set_text(format!(
-                                "Alignment not saved; retry Enter or Esc: {error}"
+                                "Alignment not saved; retry Save or Cancel in the panel: {error}"
                             )),
                         }
                     }
@@ -602,7 +615,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         } else if gaze.editing() || setup_pending {
             "Setup / settings — coaching paused"
         } else if alignment.is_some() {
-            "Paused — aligning minimap (Enter saves, Esc cancels)"
+            "Paused — use LUCAS alignment panel (Save / Cancel)"
         } else if timer.paused() {
             "Paused"
         } else if window.exists && hud.is_none() {
