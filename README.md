@@ -60,7 +60,8 @@ can also be built and checked on Linux. Builds will initially be unsigned.
    before Finish discards the draft; reopen **First-run setup…** from the
    notification-area icon to start again. Finish returns to the tray. If Finish
    fails, retry while the window is open (see [save behavior](crates/lucas-app/src/runtime/README.md#before-play)).
-   In your next game, choose **Align minimap…**,
+   In your next game, choose **Align minimap…** and follow the
+   [alignment instructions](docs/testing-on-windows.md#one-time-alignment-repeat-whenever-a-patch-moves-the-hud),
    then complete the tray's quick gaze check before play. Changed geometry may need
    explicit recalibration.
 3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
