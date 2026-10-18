@@ -221,6 +221,36 @@ uses camera-space iris ratios: it is **not calibrated**, not a screen position,
 and not a minimap detection. No camera preview is shown or stored. Low quality,
 unknown eyes, or low fps are reasons to adjust lighting and placement first.
 
+### Headless camera check (about 3 seconds)
+
+Before the recording, close the debug window and other camera apps. In PowerShell
+in the extracted bundle directory, run:
+
+```powershell
+.\lucas.exe --check-camera | Out-Host
+$LASTEXITCODE
+```
+
+The pipe waits for this Windows GUI-subsystem executable to finish. This opens
+camera **index 0** through the same `NokhwaCamera::open_c270` / `Camera::capture`
+path as the app, including acquisition timestamp validation. If several webcams
+are attached, disconnect the others so the C270 is index 0. No window, model
+inference, recording, or pixel output is involved; frames are cleared in RAM.
+
+Output includes the negotiated width/height/format/fps (expected **1280×720 MJPEG
+30 fps**), frames received over about three seconds, effective fps (received
+frames divided by elapsed capture/decode time, excluding camera open), and
+minimum/median/maximum acquisition age in milliseconds measured just after
+capture/decode.
+Exit **0** means capture completed; a nonzero exit prints the failing open/capture
+error. Low effective fps or large ages still warrant investigation; this is not a
+tracking-quality or full G2 acceptance test.
+
+**Real-camera verification is pending:** run this diagnostic from the PR's Windows
+CI artifact on the affected Windows PC and record its numeric output, exit code,
+and build commit before merging the camera fix. Linux unit tests and Windows CI
+builds alone do not confirm C270 driver behavior.
+
 ### Record the test (about 10 minutes)
 
 - Sit at your normal playing distance. Leave League closed for this test; it

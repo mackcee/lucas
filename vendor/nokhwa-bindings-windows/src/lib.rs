@@ -27,6 +27,9 @@
 //!
 //! No support or API stability will be given. Subject to change at any time.
 
+#[cfg(any(test, all(windows, not(feature = "docs-only"))))]
+mod frame_rate;
+
 #[cfg(all(windows, not(feature = "docs-only")))]
 pub mod wmf {
     use nokhwa_core::error::NokhwaError;
@@ -950,7 +953,7 @@ pub mod wmf {
                     };
 
                     let frame_rate = match unsafe { media_type.GetUINT64(&MF_MT_FRAME_RATE) } {
-                        Ok(fps) => fps as u32,
+                        Ok(fps) => super::frame_rate::decode_frame_rate(fps),
                         Err(why) => {
                             return Err(NokhwaError::GetPropertyError {
                                 property: "MF_MT_FRAME_RATE".to_string(),
