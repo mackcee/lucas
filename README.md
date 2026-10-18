@@ -37,9 +37,11 @@ the viewer below opens synthetic or saved summaries.
 
 **M4.2 adds a Windows gaze debug window and opt-in numeric glance-test recorder**
 to `lucas`; follow the [Windows testing guide](docs/testing-on-windows.md) to
-download a ready-to-run CI build. Diagnostic camera access requires clicking Connect camera;
-recording requires a separate opt-in. Diagnostics use `lucas-game` to locate
-minimap settings and make no network requests.
+download a ready-to-run CI build. In the debug window, camera access requires
+clicking Connect camera; recording requires a separate opt-in. For camera-only
+troubleshooting without the window, use the
+[headless camera check](docs/testing-on-windows.md#headless-camera-check-about-3-seconds).
+Diagnostics use `lucas-game` to locate minimap settings and make no network requests.
 
 **M5.1 adds in-app calibration and a per-user minimap classifier**. Open
 `lucas --calibrate` and follow the [calibration guide](crates/lucas-app/README.md#in-app-calibration).

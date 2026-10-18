@@ -224,7 +224,7 @@ unknown eyes, or low fps are reasons to adjust lighting and placement first.
 ### Headless camera check (about 3 seconds)
 
 Before the recording, close the debug window and other camera apps. In PowerShell
-in the extracted bundle directory, run:
+in the extracted bundle directory, run this standalone option without other flags:
 
 ```powershell
 .\lucas.exe --check-camera | Out-Host
@@ -244,7 +244,10 @@ minimum/median/maximum acquisition age in milliseconds measured just after
 capture/decode.
 Exit **0** means capture completed; a nonzero exit prints the failing open/capture
 error. Low effective fps or large ages still warrant investigation; this is not a
-tracking-quality or full G2 acceptance test.
+tracking-quality or full G2 acceptance test. The duration is not a hard deadline
+for a blocked driver; see the [capture timeout contract](../crates/lucas-gaze/README.md#acquisition-timing).
+After the check, reopen diagnostics and reconnect the camera using
+[Download and run](#download-and-run) before recording.
 
 **Real-camera verification is pending:** run this diagnostic from the PR's Windows
 CI artifact on the affected Windows PC and record its numeric output, exit code,
