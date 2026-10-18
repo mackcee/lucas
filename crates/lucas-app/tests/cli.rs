@@ -90,6 +90,44 @@ fn prints_help() {
 }
 
 #[test]
+fn camera_check_is_documented_and_rejects_other_options() {
+    let help = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8(help.stdout)
+            .unwrap()
+            .contains("--check-camera")
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .args(["--check-camera", "--seconds", "600"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("Usage: lucas --check-camera")
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn camera_check_requires_windows_without_opening_a_window() {
+    let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .arg("--check-camera")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        output.stderr,
+        b"LUCAS: --check-camera requires Windows 10/11\n"
+    );
+}
+
+#[test]
 fn prints_argument_error() {
     let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
         .arg("--invalid")

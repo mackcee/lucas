@@ -1,6 +1,7 @@
 //! Tray gaze coaching by default; numeric trace recording remains opt-in.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod camera_check;
 #[cfg(windows)]
 mod capture;
 #[cfg(windows)]
@@ -12,7 +13,7 @@ mod setup_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
-const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --check-camera\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\n--check-camera: headless 3-second camera index 0 check; prints format and timing only.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -66,7 +67,16 @@ fn main() -> ExitCode {
         };
     }
 
-    match run() {
+    let result = if args.iter().any(|flag| flag == "--check-camera") {
+        if args.len() != 1 {
+            eprintln!("Usage: lucas --check-camera (no other options)");
+            return ExitCode::from(2);
+        }
+        camera_check::run()
+    } else {
+        run()
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("LUCAS: {error}");

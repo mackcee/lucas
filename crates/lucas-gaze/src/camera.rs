@@ -198,6 +198,10 @@ mod windows {
         pub fn timestamp_origin(&self) -> Instant {
             self.origin
         }
+        /// Negotiated media type, refreshed and checked exactly during open.
+        pub fn format(&self) -> CameraFormat {
+            self.camera.format()
+        }
         pub fn open(index: u32, width: u32, height: u32, fps: u32) -> Result<Self> {
             Frame::new(width, height)?;
             if fps == 0 || fps > 30 {
