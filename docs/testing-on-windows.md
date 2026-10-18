@@ -275,6 +275,11 @@ physical monitor measurements, saved alignment and when to recalibrate.
 - Camera stopped / trace save error: check camera permissions, close other camera
   apps, and check disk space. Reconnect and start a new recording. A crash or
   forced shutdown can leave an incomplete trace; replay reports that explicitly.
+- No usable acquisition timestamps: reconnect the webcam; if the error persists,
+  update its driver. This is a timing failure, not a lighting/eye-quality failure.
+  Start a new recording after reconnecting. See the
+  [camera timing contract](../crates/lucas-gaze/README.md#acquisition-timing)
+  for skipped frames and the timeout policy.
 - Alt-tab/minimizing marks samples unlabelled while unfocused; the clock continues.
   Countdown and unfocused frames are not ground-truth fixations. Re-run if you
   were distracted. Stop/cancel uses an explicit end record; the UI reports the

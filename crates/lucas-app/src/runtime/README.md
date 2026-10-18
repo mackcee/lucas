@@ -73,8 +73,10 @@ see [Getting started](../../../../README.md#getting-started).
 approximately 30 Hz, a dedicated below-normal-priority thread owns synchronous
 camera acquisition and CPU inference, the API worker polls at about 1 Hz, and the
 overlay retains its own foreground-gated presentation thread. The camera has a
-single latest **numeric** sample slot, not a frame queue. Acquisition timestamps
-are mapped once to the app's `Instant` epoch. Each frame is consumed once by
+single latest **numeric** sample slot, not a frame queue. Camera timing follows the
+[`lucas-gaze` acquisition contract](../../../lucas-gaze/README.md#acquisition-timing);
+the worker expresses accepted acquisition times relative to the app's `Instant`
+origin. Each frame is consumed once by
 `CalibratedDetector` (which owns `GlanceDetector`); checks, completed dwell, gates
 and policy pulses feed `MetricsAccumulator`. Metrics apply at the next tick
 (normally within one tick of delivery). Replayed/future frames cannot complete

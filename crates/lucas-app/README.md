@@ -117,9 +117,10 @@ trial `id`, normalized `position: [x,y]` (top-left origin), and `kind` (`minimap
 and false-positive evaluation. No classifier decisions are recorded in M4.2.
 
 **Timing:** acquisition timestamps, not inference completion, label frames. The
-camera's Unix origin is mapped once to a monotonic clock. Each UI target
-submission is timestamped, and a late frame uses the presentation preceding its
-acquisition, not the latest target at inference completion. These are UI-submission
+camera supplies monotonic acquisition times under the
+[`lucas-gaze` timing contract](../lucas-gaze/README.md#acquisition-timing).
+Each UI target submission is timestamped, and a late frame uses the presentation
+preceding its acquisition, not the latest target at inference completion. These are UI-submission
 times, not measured display scanout; allow at least a display frame of uncertainty
 and a human reaction/settling interval at target transitions during later fitting.
 No claim is made that every frame immediately after a dot appears is fixation.

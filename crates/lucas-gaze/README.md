@@ -6,9 +6,8 @@ minimap classifier. Camera capture remains independent of calibration and decisi
 - `Camera::capture` fills caller-owned RGB8 storage; `false` means end-of-source.
 - `NokhwaCamera` (Windows/default `camera` feature) uses synchronous Media
   Foundation capture, explicit 1280×720 MJPEG/30fps for the C270, pure-Rust JPEG
-  decoding, and below-normal priority on its calling thread. Acquisition timestamps
-  are mapped relative to a fixed epoch at stream opening, not decoding completion;
-  missing or pre-epoch timestamps fail capture rather than inventing fresh timing.
+  decoding, and below-normal priority on its calling thread. See
+  [acquisition timing](#acquisition-timing) for clock mapping and rejected frames.
   Unsupported modes return a recoverable error rather than silently changing
   resolution/frame rate.
 - `ImageCamera` reads existing still-image fixtures. `TraceGazeSource` replays
@@ -31,6 +30,32 @@ minimap classifier. Camera capture remains independent of calibration and decisi
   latter is not distance in metres. One-Euro filters use monotonic timestamps
   and reset on loss/gaps. `calibration` maps these unmirrored features into screen
   coordinates and minimap probability; `decision` bridges into the core detector.
+
+## Acquisition timing
+
+`NokhwaCamera::timestamp_origin()` exposes the fixed `Instant` origin captured
+before opening the stream. Add a frame's timestamp to it to recover acquisition
+on the application's monotonic clock, not decoding or inference completion.
+There is no wall-clock epoch conversion.
+
+The [vendored raw-sample API](../../vendor/nokhwa-bindings-windows/README.md)
+preserves Media Foundation sample time. Capture treats it as QPC-based: frame
+age is `MFGetSystemTime()` at receipt minus raw sample time, and acquisition is
+receipt `Instant` minus that age. The clock-read bracket must take at most 1 ms.
+Only nonzero timestamps aged 0–1 second, at or after the camera origin and
+strictly newer than the previous accepted frame, are usable. Stream-relative
+times have no established acquisition origin and receive no special conversion;
+times outside these bounds are rejected.
+
+Missing or unusable timestamps cause individual frames to be skipped before
+inference, labeling or trace recording. Receipt-time fallback and synthetic
+retiming are never used. After three continuous seconds of invalid timestamps
+(measured from the first rejected frame), capture returns `Error::CameraTimestamp`;
+a valid frame resets that timeout. This is checked when capture returns samples,
+not a watchdog for a blocked driver. See the
+[Windows troubleshooting guide](../../docs/testing-on-windows.md#troubleshooting--development)
+for recovery and [`camera/timestamp.rs`](src/camera/timestamp.rs) for the mapping
+and regression tests.
 
 ## Construct on a dedicated worker thread (Windows)
 

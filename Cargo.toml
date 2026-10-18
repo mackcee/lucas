@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*", "xtask"]
+exclude = ["vendor/nokhwa-bindings-windows"]
 resolver = "3"
 
 [workspace.package]
@@ -11,3 +12,6 @@ repository = "https://github.com/mackcee/lucas"
 
 # Add shared dependencies here only when a member actually needs them.
 [workspace.dependencies]
+
+[patch.crates-io]
+nokhwa-bindings-windows = { path = "vendor/nokhwa-bindings-windows" }

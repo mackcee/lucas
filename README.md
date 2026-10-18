@@ -172,6 +172,7 @@ Licensed under either of
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), or
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-at your option. Third-party MediaPipe models remain Apache-2.0; see [NOTICE](NOTICE).
+at your option. Third-party licenses and attribution, including the MediaPipe
+models and vendored camera bindings, are listed in [NOTICE](NOTICE).
 For bundled UI font notices and distribution requirements, see the
 [card reference](crates/lucas-app/README.md).
