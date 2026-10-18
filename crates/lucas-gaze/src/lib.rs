@@ -47,7 +47,7 @@ impl std::fmt::Display for Error {
             Self::InvalidTimestamp => "sample timestamps must increase",
             Self::CameraUnavailable => "camera unavailable or requested format unsupported",
             Self::CameraTimestamp => {
-                "camera clock is invalid; reconnect the webcam or update its driver"
+                "camera supplied no usable acquisition timestamps for 3 seconds; reconnect the webcam or update its driver"
             }
             Self::CaptureFailed => "camera frame capture failed",
             Self::ImageReadFailed => "fixture image could not be read",

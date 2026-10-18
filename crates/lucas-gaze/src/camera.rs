@@ -174,15 +174,16 @@ fn decode_mjpeg(data: &[u8], timestamp: Duration, frame: &mut Frame) -> Result<(
 mod windows {
     use super::*;
     use nokhwa::utils::{
-        ApiBackend, CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType,
+        CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType,
     };
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use nokhwa_bindings_windows::wmf::MediaFoundationDevice;
+    use std::time::Instant;
     use timestamp::CaptureClock;
 
     /// Windows Media Foundation, synchronous mode (not nokhwa's threaded callback).
     /// C270 HD default is 1280x720 MJPEG at 30fps; software decoding, no mozjpeg.
     pub struct NokhwaCamera {
-        camera: nokhwa::Camera,
+        camera: MediaFoundationDevice,
         origin: Instant,
         clock: CaptureClock,
         dimensions: (u32, u32),
@@ -208,23 +209,29 @@ mod windows {
                 RequestedFormatType::Exact(format),
                 &[FrameFormat::MJPEG],
             );
-            let mut camera = nokhwa::Camera::with_backend(
-                CameraIndex::Index(index),
-                request,
-                ApiBackend::MediaFoundation,
-            )
-            .map_err(|_| Error::CameraUnavailable)?;
-            let origin = Instant::now();
-            camera.open_stream().map_err(|_| Error::CameraUnavailable)?;
-            // nokhwa-bindings-windows 0.4.6 stores its private UNIX epoch at the
-            // end of open_stream and adds the MF sample time to it. Estimate
-            // that epoch immediately on return, NOT before the potentially slow
-            // stream setup. The small return-path delay overestimates frame age;
-            // it does not add stream setup time or uptime to acquisition time.
-            let stream_epoch = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            let mut camera = MediaFoundationDevice::new(CameraIndex::Index(index))
                 .map_err(|_| Error::CameraUnavailable)?;
-            let clock = CaptureClock::new(stream_epoch, origin.elapsed());
+            let available = camera
+                .compatible_format_list()
+                .map_err(|_| Error::CameraUnavailable)?;
+            let desired = request
+                .fulfill(&available)
+                .ok_or(Error::CameraUnavailable)?;
+            camera
+                .set_format(desired)
+                .map_err(|_| Error::CameraUnavailable)?;
+            if camera
+                .format_refreshed()
+                .map_err(|_| Error::CameraUnavailable)?
+                != format
+            {
+                return Err(Error::CameraUnavailable);
+            }
+            camera
+                .start_stream()
+                .map_err(|_| Error::CameraUnavailable)?;
+            let origin = camera.stream_started_at().ok_or(Error::CameraUnavailable)?;
+            let clock = CaptureClock::new(Duration::ZERO);
             Ok(Self {
                 camera,
                 origin,
@@ -242,16 +249,26 @@ mod windows {
             if (frame.width, frame.height) != self.dimensions {
                 return Err(Error::InvalidFrame);
             }
-            let compressed = self.camera.frame().map_err(|_| Error::CaptureFailed)?;
-            // Pair clocks at receipt, before JPEG decoding or inference. MF's
-            // system time uses QPC, not UNIX wall time or GetTickCount uptime.
-            let system_now = mf_system_time()?;
-            let received = self.origin.elapsed();
-            let timestamp = self
-                .clock
-                .map(compressed.capture_timestamp(), received, system_now)?;
-            decode_mjpeg(compressed.buffer(), timestamp, frame)?;
-            Ok(true)
+            loop {
+                let (compressed, raw) = self
+                    .camera
+                    .raw_sample_bytes()
+                    .map_err(|_| Error::CaptureFailed)?;
+                let before = self.origin.elapsed();
+                let system_now = mf_system_time().ok();
+                let received = self.origin.elapsed();
+                let raw = raw.filter(|_| {
+                    system_now.is_some() && received - before <= Duration::from_millis(1)
+                });
+                let Some(timestamp) =
+                    self.clock
+                        .map(raw, received, system_now.unwrap_or_default())?
+                else {
+                    continue;
+                };
+                decode_mjpeg(&compressed, timestamp, frame)?;
+                return Ok(true);
+            }
         }
     }
     #[allow(unsafe_code)]

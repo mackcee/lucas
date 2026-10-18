@@ -1,6 +1,14 @@
 LUCAS — League Universal Coach AI System
 Copyright (c) 2026 Charlie Mack
 
+nokhwa-bindings-windows
+-----------------------
+Copyright 2022 l1npengtul / The Nokhwa Contributors
+Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE).
+Upstream: https://github.com/l1npengtul/nokhwa
+The vendored 0.4.6 capture bindings are modified to expose raw sample timing
+and the monotonic stream origin; see vendor/nokhwa-bindings-windows/README.md.
+
 MediaPipe models and reference geometry
 --------------------------------------
 Copyright 2019-2025 The MediaPipe Authors / Google LLC
