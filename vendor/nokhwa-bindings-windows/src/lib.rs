@@ -411,9 +411,9 @@ pub mod wmf {
         device_specifier: CameraInfo,
         device_format: CameraFormat,
         source_reader: IMFSourceReader,
-        /// Wallclock instant captured when the stream was started.
-        /// MF sample timestamps are relative to stream start, so
-        /// `stream_epoch + sample_time` gives us an absolute wallclock.
+        /// Legacy wall-clock offset retained for `raw_bytes` compatibility.
+        /// It is not a proven origin for MF sample time; acquisition-aware callers
+        /// must use `raw_sample_bytes` instead of assuming stream-relative time.
         stream_epoch: Option<Duration>,
     }
 
@@ -1144,7 +1144,9 @@ pub mod wmf {
             Ok((bytes, raw.and_then(|time| epoch?.checked_add(time))))
         }
 
-        pub fn raw_sample_bytes(&mut self) -> Result<(Cow<'_, [u8]>, Option<Duration>), NokhwaError> {
+        pub fn raw_sample_bytes(
+            &mut self,
+        ) -> Result<(Cow<'_, [u8]>, Option<Duration>), NokhwaError> {
             let mut imf_sample: Option<IMFSample> = match unsafe { MFCreateSample() } {
                 Ok(sample) => Some(sample),
                 Err(why) => {
