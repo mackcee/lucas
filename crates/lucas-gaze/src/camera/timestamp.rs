@@ -1,27 +1,17 @@
 use crate::{Error, Result};
 use std::time::Duration;
 
-const MAX_FRAME_AGE: Duration = Duration::from_secs(30);
+const MAX_FRAME_AGE: Duration = Duration::from_secs(1);
 const INVALID_TIMEOUT: Duration = Duration::from_secs(3);
 
-#[derive(Clone, Copy)]
-enum Domain {
-    System,
-    Stream,
-}
-
 pub(super) struct CaptureClock {
-    stream_start: Duration,
-    domain: Option<Domain>,
     last: Option<Duration>,
     invalid_since: Option<Duration>,
 }
 
 impl CaptureClock {
-    pub(super) fn new(stream_start: Duration) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            stream_start,
-            domain: None,
             last: None,
             invalid_since: None,
         }
@@ -33,35 +23,14 @@ impl CaptureClock {
         received: Duration,
         system_now: Duration,
     ) -> Result<Option<Duration>> {
-        let candidate = raw.filter(|time| !time.is_zero()).and_then(|raw| {
-            let plausible = |candidate: Option<Duration>| {
-                candidate.filter(|time| {
-                    *time >= self.stream_start
-                        && *time <= received
-                        && received - *time <= MAX_FRAME_AGE
-                })
-            };
-            let system = plausible(
-                system_now
-                    .checked_sub(raw)
-                    .and_then(|age| received.checked_sub(age)),
-            );
-            let stream = plausible(self.stream_start.checked_add(raw));
-            match self.domain {
-                Some(Domain::System) => system.map(|time| (Domain::System, time)),
-                Some(Domain::Stream) => stream.map(|time| (Domain::Stream, time)),
-                None => match (system, stream) {
-                    (Some(time), None) => Some((Domain::System, time)),
-                    (None, Some(time)) => Some((Domain::Stream, time)),
-                    (Some(a), Some(b)) if a == b => Some((Domain::System, a)),
-                    _ => None,
-                },
-            }
-        });
-        if let Some((domain, time)) = candidate
+        let candidate = raw
+            .filter(|time| !time.is_zero())
+            .and_then(|raw| system_now.checked_sub(raw))
+            .filter(|age| *age <= MAX_FRAME_AGE)
+            .and_then(|age| received.checked_sub(age));
+        if let Some(time) = candidate
             && self.last.is_none_or(|last| time > last)
         {
-            self.domain = Some(domain);
             self.last = Some(time);
             self.invalid_since = None;
             return Ok(Some(time));
@@ -86,7 +55,7 @@ mod tests {
 
     #[test]
     fn qpc_samples_preserve_age_and_frame_gaps_not_receipt_spacing() {
-        let mut clock = CaptureClock::new(ms(0));
+        let mut clock = CaptureClock::new();
         assert_eq!(
             clock.map(Some(UPTIME + ms(33)), ms(50), UPTIME + ms(50)),
             Ok(Some(ms(33)))
@@ -103,7 +72,7 @@ mod tests {
 
     #[test]
     fn delayed_open_return_does_not_shift_raw_qpc_acquisition() {
-        let mut clock = CaptureClock::new(ms(0));
+        let mut clock = CaptureClock::new();
         assert_eq!(
             clock.map(Some(UPTIME + ms(230)), ms(250), UPTIME + ms(250)),
             Ok(Some(ms(230)))
@@ -111,16 +80,20 @@ mod tests {
     }
 
     #[test]
-    fn stream_relative_samples_include_backend_start_and_preserve_age() {
-        let mut clock = CaptureClock::new(ms(200));
-        assert_eq!(clock.map(Some(ms(33)), ms(250), UPTIME), Ok(Some(ms(233))));
-        assert_eq!(clock.map(Some(ms(66)), ms(550), UPTIME), Ok(Some(ms(266))));
+    fn stream_relative_samples_after_initialization_delay_are_skipped() {
+        let mut clock = CaptureClock::new();
+        assert_eq!(clock.map(Some(ms(33)), ms(250), UPTIME + ms(250)), Ok(None));
+        assert_eq!(clock.map(Some(ms(66)), ms(550), UPTIME + ms(550)), Ok(None));
+        assert_eq!(
+            clock.map(Some(UPTIME + ms(600)), ms(650), UPTIME + ms(650)),
+            Ok(Some(ms(600)))
+        );
     }
 
     #[test]
     fn zero_and_missing_are_skipped_then_real_samples_are_unchanged() {
         for missing in [None, Some(Duration::ZERO)] {
-            let mut clock = CaptureClock::new(ms(0));
+            let mut clock = CaptureClock::new();
             assert_eq!(clock.map(missing, ms(300), UPTIME + ms(300)), Ok(None));
             assert_eq!(
                 clock.map(Some(UPTIME + ms(66)), ms(350), UPTIME + ms(350)),
@@ -135,8 +108,24 @@ mod tests {
     }
 
     #[test]
+    fn only_ages_from_zero_to_one_second_are_accepted() {
+        let received = ms(2000);
+        let system = UPTIME + received;
+        let tick = Duration::from_nanos(100);
+        for (raw, expected) in [
+            (system, Some(received)),
+            (system - ms(1000), Some(ms(1000))),
+            (system - ms(1000) - tick, None),
+            (system + tick, None),
+        ] {
+            let mut clock = CaptureClock::new();
+            assert_eq!(clock.map(Some(raw), received, system), Ok(expected));
+        }
+    }
+
+    #[test]
     fn future_samples_are_not_clamped_to_receipt() {
-        let mut clock = CaptureClock::new(ms(0));
+        let mut clock = CaptureClock::new();
         assert_eq!(
             clock.map(Some(UPTIME + ms(51)), ms(50), UPTIME + ms(50)),
             Ok(None)
@@ -149,30 +138,46 @@ mod tests {
 
     #[test]
     fn duplicates_and_backward_samples_are_skipped_without_retiming() {
-        let mut clock = CaptureClock::new(ms(0));
-        assert_eq!(clock.map(Some(ms(200)), ms(220), UPTIME), Ok(Some(ms(200))));
-        assert_eq!(clock.map(Some(ms(200)), ms(250), UPTIME), Ok(None));
-        assert_eq!(clock.map(Some(ms(199)), ms(260), UPTIME), Ok(None));
-        assert_eq!(clock.map(Some(ms(1)), ms(270), UPTIME), Ok(None));
-        assert_eq!(clock.map(Some(ms(233)), ms(300), UPTIME), Ok(Some(ms(233))));
+        let mut clock = CaptureClock::new();
+        for (acquired, received, expected) in [
+            (200, 220, Some(ms(200))),
+            (200, 250, None),
+            (199, 260, None),
+            (1, 270, None),
+            (233, 300, Some(ms(233))),
+        ] {
+            assert_eq!(
+                clock.map(
+                    Some(UPTIME + ms(acquired)),
+                    ms(received),
+                    UPTIME + ms(received)
+                ),
+                Ok(expected)
+            );
+        }
     }
 
     #[test]
-    fn future_stale_and_overflow_times_are_skipped_without_panicking() {
+    fn implausible_times_are_skipped_without_panicking() {
         for (raw, received, system) in [
-            (Some(UPTIME + ms(1000)), ms(50), UPTIME + ms(50)),
             (Some(Duration::MAX), ms(50), UPTIME),
-            (Some(ms(1)), Duration::from_secs(31), UPTIME),
+            (Some(UPTIME - ms(1)), ms(50), UPTIME + ms(50)),
+            (Some(UPTIME + ms(1)), ms(1002), UPTIME + ms(1002)),
         ] {
-            let mut clock = CaptureClock::new(ms(1));
+            let mut clock = CaptureClock::new();
             assert_eq!(clock.map(raw, received, system), Ok(None));
         }
     }
 
     #[test]
     fn persistent_missing_or_implausible_times_fail_after_three_seconds() {
-        for invalid in [None, Some(Duration::ZERO), Some(Duration::MAX)] {
-            let mut clock = CaptureClock::new(ms(0));
+        for invalid in [
+            None,
+            Some(Duration::ZERO),
+            Some(Duration::MAX),
+            Some(ms(33)),
+        ] {
+            let mut clock = CaptureClock::new();
             assert_eq!(clock.map(invalid, ms(50), UPTIME + ms(50)), Ok(None));
             assert_eq!(clock.map(invalid, ms(3049), UPTIME + ms(3049)), Ok(None));
             assert_eq!(
@@ -184,23 +189,23 @@ mod tests {
 
     #[test]
     fn valid_frame_resets_the_invalid_timestamp_timeout() {
-        let mut clock = CaptureClock::new(ms(0));
-        assert_eq!(clock.map(None, ms(50), UPTIME), Ok(None));
+        let mut clock = CaptureClock::new();
+        assert_eq!(clock.map(None, ms(50), UPTIME + ms(50)), Ok(None));
         assert_eq!(
-            clock.map(Some(ms(2990)), ms(3000), UPTIME),
+            clock.map(Some(UPTIME + ms(2990)), ms(3000), UPTIME + ms(3000)),
             Ok(Some(ms(2990)))
         );
-        assert_eq!(clock.map(None, ms(3100), UPTIME), Ok(None));
-        assert_eq!(clock.map(None, ms(6099), UPTIME), Ok(None));
+        assert_eq!(clock.map(None, ms(3100), UPTIME + ms(3100)), Ok(None));
+        assert_eq!(clock.map(None, ms(6099), UPTIME + ms(6099)), Ok(None));
         assert_eq!(
-            clock.map(None, ms(6100), UPTIME),
+            clock.map(None, ms(6100), UPTIME + ms(6100)),
             Err(Error::CameraTimestamp)
         );
     }
 
     #[test]
-    fn established_clock_domain_cannot_switch_after_reset() {
-        let mut clock = CaptureClock::new(ms(0));
+    fn stream_relative_times_after_qpc_samples_are_still_skipped() {
+        let mut clock = CaptureClock::new();
         assert_eq!(
             clock.map(Some(UPTIME + ms(33)), ms(50), UPTIME + ms(50)),
             Ok(Some(ms(33)))
@@ -210,11 +215,5 @@ mod tests {
             clock.map(Some(ms(99)), ms(3080), UPTIME + ms(3080)),
             Err(Error::CameraTimestamp)
         );
-    }
-
-    #[test]
-    fn ambiguous_initial_clock_domain_is_not_guessed() {
-        let mut clock = CaptureClock::new(ms(0));
-        assert_eq!(clock.map(Some(ms(100)), ms(200), ms(250)), Ok(None));
     }
 }

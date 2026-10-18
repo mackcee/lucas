@@ -227,11 +227,11 @@ mod windows {
             {
                 return Err(Error::CameraUnavailable);
             }
+            let origin = Instant::now();
             camera
                 .start_stream()
                 .map_err(|_| Error::CameraUnavailable)?;
-            let origin = camera.stream_started_at().ok_or(Error::CameraUnavailable)?;
-            let clock = CaptureClock::new(Duration::ZERO);
+            let clock = CaptureClock::new();
             Ok(Self {
                 camera,
                 origin,

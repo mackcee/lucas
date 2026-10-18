@@ -45,7 +45,7 @@ pub mod wmf {
             atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc,
         },
-        time::{Duration, Instant},
+        time::Duration,
     };
     use windows::Win32::Media::DirectShow::{CameraControl_Flags_Auto, CameraControl_Flags_Manual};
     use windows::Win32::Media::MediaFoundation::{
@@ -415,7 +415,6 @@ pub mod wmf {
         /// MF sample timestamps are relative to stream start, so
         /// `stream_epoch + sample_time` gives us an absolute wallclock.
         stream_epoch: Option<Duration>,
-        stream_started_at: Option<Instant>,
     }
 
     impl MediaFoundationDevice {
@@ -501,7 +500,6 @@ pub mod wmf {
                         device_format: CameraFormat::default(),
                         source_reader,
                         stream_epoch: None,
-                        stream_started_at: None,
                     })
                 }
                 CameraIndex::String(s) => {
@@ -1133,16 +1131,11 @@ pub mod wmf {
                 return Err(NokhwaError::OpenStreamError(why.to_string()));
             }
 
-            self.stream_started_at = Some(Instant::now());
             self.stream_epoch = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .ok();
             self.is_open.set(true);
             Ok(())
-        }
-
-        pub fn stream_started_at(&self) -> Option<Instant> {
-            self.stream_started_at
         }
 
         pub fn raw_bytes(&mut self) -> Result<(Cow<'_, [u8]>, Option<Duration>), NokhwaError> {
@@ -1233,7 +1226,6 @@ pub mod wmf {
         }
 
         pub fn stop_stream(&mut self) {
-            self.stream_started_at = None;
             self.stream_epoch = None;
             self.is_open.set(false);
         }
