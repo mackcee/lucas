@@ -17,7 +17,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::JoinHandle,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Copy)]
@@ -278,16 +278,8 @@ fn run(
     context: &eframe::egui::Context,
 ) -> trace::Result<()> {
     let camera = NokhwaCamera::open_c270(index)?;
-    // Anchor wall-clock camera origin once to a monotonic instant. Later system
-    // clock adjustments cannot move already presented targets.
-    let now = Instant::now();
-    let wall = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    let camera_origin = now
-        .checked_sub(
-            wall.checked_sub(camera.timestamp_epoch())
-                .ok_or("camera epoch is in the future")?,
-        )
-        .ok_or("camera epoch cannot be mapped")?;
+    // Camera acquisition and displayed targets share Instant's monotonic clock.
+    let camera_origin = camera.timestamp_origin();
     let raw = Arc::new(Mutex::new(Raw::default()));
     let landmarker = ObservedLandmarker {
         inner: MediaPipeLandmarker::new(OrtBackend::new(VerifiedModels::load(&models)?)?),
@@ -303,10 +295,13 @@ fn run(
         let cpu_ms = cpu.elapsed().as_secs_f64() * 1000.0;
         let acquired = camera_origin
             .checked_add(sample.timestamp)
-            .ok_or("camera timestamp overflow")?;
+            .ok_or("camera timestamp overflow; reconnect the webcam or update its driver")?;
         let received = Instant::now();
         if acquired > received + Duration::from_millis(100) {
-            return Err("camera timestamp is in the future".into());
+            return Err(
+                "camera timestamp is in the future; reconnect the webcam or update its driver"
+                    .into(),
+            );
         }
         recent.push_back(sample.timestamp);
         while recent.len() > 60 {

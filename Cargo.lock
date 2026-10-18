@@ -2266,6 +2266,7 @@ dependencies = [
  "ort",
  "sha2",
  "thread-priority",
+ "windows",
  "zeroize",
 ]
 

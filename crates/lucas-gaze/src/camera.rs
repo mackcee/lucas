@@ -5,6 +5,9 @@ use crate::{Error, Result};
 use std::{path::PathBuf, time::Duration};
 use zeroize::Zeroize;
 
+#[cfg(any(test, all(windows, feature = "camera")))]
+mod timestamp;
+
 const MAX_PIXELS: u32 = 1920 * 1080;
 pub const RING_CAPACITY: usize = 3;
 
@@ -144,17 +147,9 @@ impl<I: Iterator<Item = (Duration, PathBuf)>> Camera for ImageCamera<I> {
 }
 
 #[cfg(any(test, all(windows, feature = "camera")))]
-fn decode_mjpeg(
-    data: &[u8],
-    capture_timestamp: Option<Duration>,
-    epoch: Duration,
-    frame: &mut Frame,
-) -> Result<()> {
+fn decode_mjpeg(data: &[u8], timestamp: Duration, frame: &mut Frame) -> Result<()> {
     use image::ImageDecoder;
     frame.clear();
-    let timestamp = capture_timestamp
-        .and_then(|time| time.checked_sub(epoch))
-        .ok_or(Error::CaptureFailed)?;
     let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(data))
         .map_err(|_| Error::CaptureFailed)?;
     if decoder.dimensions() != (frame.width, frame.height)
@@ -181,13 +176,15 @@ mod windows {
     use nokhwa::utils::{
         ApiBackend, CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType,
     };
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use timestamp::CaptureClock;
 
     /// Windows Media Foundation, synchronous mode (not nokhwa's threaded callback).
     /// C270 HD default is 1280x720 MJPEG at 30fps; software decoding, no mozjpeg.
     pub struct NokhwaCamera {
         camera: nokhwa::Camera,
-        epoch: Duration,
+        origin: Instant,
+        clock: CaptureClock,
         dimensions: (u32, u32),
     }
     impl NokhwaCamera {
@@ -195,10 +192,10 @@ mod windows {
         pub fn open_c270(index: u32) -> Result<Self> {
             Self::open(index, 1280, 720, 30)
         }
-        /// UNIX origin of this camera's sample timestamps. Diagnostics can align
-        /// acquisition (rather than inference completion) with displayed targets.
-        pub fn timestamp_epoch(&self) -> Duration {
-            self.epoch
+        /// Monotonic origin of acquisition timestamps, shared with displayed
+        /// targets. Neither inference delays nor wall-clock changes move it.
+        pub fn timestamp_origin(&self) -> Instant {
+            self.origin
         }
         pub fn open(index: u32, width: u32, height: u32, fps: u32) -> Result<Self> {
             Frame::new(width, height)?;
@@ -217,13 +214,21 @@ mod windows {
                 ApiBackend::MediaFoundation,
             )
             .map_err(|_| Error::CameraUnavailable)?;
-            let epoch = SystemTime::now()
+            let origin = Instant::now();
+            camera.open_stream().map_err(|_| Error::CameraUnavailable)?;
+            // nokhwa-bindings-windows 0.4.6 stores its private UNIX epoch at the
+            // end of open_stream and adds the MF sample time to it. Estimate
+            // that epoch immediately on return, NOT before the potentially slow
+            // stream setup. The small return-path delay overestimates frame age;
+            // it does not add stream setup time or uptime to acquisition time.
+            let stream_epoch = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| Error::CameraUnavailable)?;
-            camera.open_stream().map_err(|_| Error::CameraUnavailable)?;
+            let clock = CaptureClock::new(stream_epoch, origin.elapsed());
             Ok(Self {
                 camera,
-                epoch,
+                origin,
+                clock,
                 dimensions: (width, height),
             })
         }
@@ -238,14 +243,27 @@ mod windows {
                 return Err(Error::InvalidFrame);
             }
             let compressed = self.camera.frame().map_err(|_| Error::CaptureFailed)?;
-            decode_mjpeg(
-                compressed.buffer(),
-                compressed.capture_timestamp(),
-                self.epoch,
-                frame,
-            )?;
+            // Pair clocks at receipt, before JPEG decoding or inference. MF's
+            // system time uses QPC, not UNIX wall time or GetTickCount uptime.
+            let system_now = mf_system_time()?;
+            let received = self.origin.elapsed();
+            let timestamp = self
+                .clock
+                .map(compressed.capture_timestamp(), received, system_now)?;
+            decode_mjpeg(compressed.buffer(), timestamp, frame)?;
             Ok(true)
         }
+    }
+    #[allow(unsafe_code)]
+    fn mf_system_time() -> Result<Duration> {
+        // SAFETY: MFGetSystemTime takes no pointers or handles and has no
+        // caller preconditions; it reads the system's QPC-based MF clock.
+        let ticks = unsafe { ::windows::Win32::Media::MediaFoundation::MFGetSystemTime() };
+        let nanos = u64::try_from(ticks)
+            .ok()
+            .and_then(|ticks| ticks.checked_mul(100))
+            .ok_or(Error::CameraTimestamp)?;
+        Ok(Duration::from_nanos(nanos))
     }
     fn lower_thread_priority() -> Result<()> {
         thread_priority::set_winapi_thread_priority(
@@ -282,25 +300,15 @@ mod tests {
             .to_rgb8()
             .dimensions();
         let mut frame = Frame::new(w, h).unwrap();
-        decode_mjpeg(jpeg, Some(Duration::ZERO), Duration::ZERO, &mut frame).unwrap();
+        decode_mjpeg(jpeg, Duration::ZERO, &mut frame).unwrap();
         assert!(frame.rgb().iter().any(|p| *p > 0));
         assert_eq!(
-            decode_mjpeg(
-                b"invalid jpeg",
-                Some(Duration::ZERO),
-                Duration::ZERO,
-                &mut frame,
-            ),
+            decode_mjpeg(b"invalid jpeg", Duration::ZERO, &mut frame,),
             Err(Error::CaptureFailed)
         );
         assert!(frame.rgb().iter().all(|p| *p == 0));
         assert_eq!(
-            decode_mjpeg(
-                jpeg,
-                Some(Duration::ZERO),
-                Duration::ZERO,
-                &mut Frame::new(2, 2).unwrap(),
-            ),
+            decode_mjpeg(jpeg, Duration::ZERO, &mut Frame::new(2, 2).unwrap(),),
             Err(Error::InvalidFrame)
         );
     }
@@ -312,43 +320,16 @@ mod tests {
             .to_rgb8()
             .dimensions();
         let mut frame = Frame::new(w, h).unwrap();
-        let epoch = Duration::from_secs(1_700_000_000);
-        let acquired = epoch + Duration::from_millis(33);
+        let acquired = Duration::from_millis(33);
         std::thread::sleep(Duration::from_millis(300));
-        decode_mjpeg(jpeg, Some(acquired), epoch, &mut frame).unwrap();
+        decode_mjpeg(jpeg, acquired, &mut frame).unwrap();
         assert_eq!(frame.timestamp(), Duration::from_millis(33));
         let first = frame.timestamp();
-        decode_mjpeg(
-            jpeg,
-            Some(epoch + Duration::from_millis(66)),
-            epoch,
-            &mut frame,
-        )
-        .unwrap();
+        decode_mjpeg(jpeg, Duration::from_millis(66), &mut frame).unwrap();
         assert_eq!(frame.timestamp() - first, Duration::from_millis(33));
         let second = frame.timestamp();
-        decode_mjpeg(
-            jpeg,
-            Some(epoch + Duration::from_millis(400)),
-            epoch,
-            &mut frame,
-        )
-        .unwrap();
+        decode_mjpeg(jpeg, Duration::from_millis(400), &mut frame).unwrap();
         assert_eq!(frame.timestamp() - second, Duration::from_millis(334));
-    }
-    #[test]
-    fn missing_or_pre_epoch_acquisition_time_fails_and_scrubs() {
-        let jpeg = include_bytes!("../tests/fixtures/portrait.jpg");
-        let epoch = Duration::from_secs(10);
-        let mut frame = Frame::new(2, 2).unwrap();
-        for timestamp in [None, Some(epoch - Duration::from_nanos(1))] {
-            frame.rgb_mut().fill(213);
-            assert_eq!(
-                decode_mjpeg(jpeg, timestamp, epoch, &mut frame),
-                Err(Error::CaptureFailed)
-            );
-            assert!(frame.rgb().iter().all(|p| *p == 0));
-        }
     }
     #[test]
     fn rejects_oversized_and_empty_frames() {

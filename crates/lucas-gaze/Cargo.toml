@@ -11,7 +11,7 @@ publish = false
 [features]
 default = ["ort", "camera"]
 ort = ["dep:ort"]
-camera = ["dep:nokhwa", "dep:thread-priority"]
+camera = ["dep:nokhwa", "dep:thread-priority", "dep:windows"]
 
 [dependencies]
 lucas-core = { path = "../lucas-core" }
@@ -25,6 +25,7 @@ ort = { version = "=2.0.0-rc.14", optional = true, default-features = false, fea
 [target.'cfg(windows)'.dependencies]
 nokhwa = { version = "0.10.11", optional = true, default-features = false, features = ["input-msmf"] }
 thread-priority = { version = "3.0.0", optional = true }
+windows = { version = "0.62.2", optional = true, features = ["Win32_Media_MediaFoundation"] }
 
 [dev-dependencies]
 cpu-time = "1.0.0"

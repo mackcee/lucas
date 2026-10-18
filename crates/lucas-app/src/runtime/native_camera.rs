@@ -13,7 +13,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 pub struct CameraWorker {
@@ -32,13 +32,9 @@ impl CameraWorker {
                 let run = || -> lucas_gaze::Result<()> {
                     let backend = OrtBackend::new(VerifiedModels::load(&models)?)?;
                     let camera = NokhwaCamera::open_c270(index)?;
-                    // Pair UNIX acquisition timestamps with the app's Instant once;
-                    // never stamp inference completion as a gaze observation.
-                    let wall = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .map_err(|_| lucas_gaze::Error::InvalidTimestamp)?;
-                    let mono = origin.elapsed();
-                    let epoch = camera.timestamp_epoch();
+                    // Acquisition already uses the same monotonic clock as the
+                    // app; never stamp inference completion as an observation.
+                    let camera_origin = camera.timestamp_origin();
                     let mut source = CaptureSession::default();
                     source.set_wanted(true, || {
                         WebcamGazeSource::new(camera, MediaPipeLandmarker::new(backend))
@@ -47,13 +43,10 @@ impl CameraWorker {
                         let Some(mut sample) = source.next_sample()? else {
                             break;
                         };
-                        let acquired = epoch + sample.timestamp;
-                        sample.timestamp = if acquired >= wall {
-                            mono.checked_add(acquired - wall)
-                        } else {
-                            mono.checked_sub(wall - acquired)
-                        }
-                        .ok_or(lucas_gaze::Error::InvalidTimestamp)?;
+                        sample.timestamp = camera_origin
+                            .checked_add(sample.timestamp)
+                            .and_then(|acquired| acquired.checked_duration_since(origin))
+                            .ok_or(lucas_gaze::Error::InvalidTimestamp)?;
                         if sample.timestamp <= origin.elapsed()
                             && let Ok(mut slot) = slot.lock()
                         {

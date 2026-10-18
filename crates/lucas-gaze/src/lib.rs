@@ -4,7 +4,8 @@
 //! samples require downstream calibration/classification before `lucas-core` can
 //! apply its dwell detector.
 
-#![forbid(unsafe_code)]
+// Only the argument-free MF clock read in camera is allowed to use unsafe.
+#![deny(unsafe_code, unsafe_op_in_unsafe_fn)]
 
 pub mod calibration;
 pub mod camera;
@@ -27,6 +28,7 @@ pub enum Error {
     InvalidFrame,
     InvalidTimestamp,
     CameraUnavailable,
+    CameraTimestamp,
     CaptureFailed,
     ImageReadFailed,
     ModelReadFailed,
@@ -44,6 +46,9 @@ impl std::fmt::Display for Error {
             Self::InvalidFrame => "invalid frame dimensions or RGB buffer",
             Self::InvalidTimestamp => "sample timestamps must increase",
             Self::CameraUnavailable => "camera unavailable or requested format unsupported",
+            Self::CameraTimestamp => {
+                "camera clock is invalid; reconnect the webcam or update its driver"
+            }
             Self::CaptureFailed => "camera frame capture failed",
             Self::ImageReadFailed => "fixture image could not be read",
             Self::ModelReadFailed => "model missing or unreadable; run cargo xtask models prepare",
