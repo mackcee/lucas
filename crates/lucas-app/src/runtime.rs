@@ -124,6 +124,7 @@ impl Runtime {
         self.settings.pulse = settings.pulse.clone();
         self.settings.density_cap = settings.density_cap;
         self.settings.setup_completed = settings.setup_completed;
+        self.settings.camera_frame_rate = settings.camera_frame_rate;
         Ok(())
     }
     pub fn arm_solo(&mut self, armed: bool) {
@@ -312,7 +313,7 @@ impl Runtime {
         }
         self.reset_detector()
     }
-    /// Run at ~30Hz. Each acquisition is fed to the detector exactly once; a
+    /// Poll faster than the camera rate (up to 60 Hz). Each acquisition is fed to the detector exactly once; a
     /// held latest frame cannot satisfy dwell. Missing streams expire at 250ms.
     pub fn tick(
         &mut self,

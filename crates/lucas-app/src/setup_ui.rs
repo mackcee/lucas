@@ -5,7 +5,7 @@ use eframe::{
     App,
     egui::{self, Color32, ViewportCommand},
 };
-use lucas_app::preferences::{Setup, SetupStep, level_picker};
+use lucas_app::preferences::{Setup, SetupStep, camera_frame_rate_picker, level_picker};
 use lucas_game::{DisplayMode, Win32WindowProbe, WindowProbe};
 use lucas_store::{PulseStyle, Settings, Store};
 use std::{
@@ -130,6 +130,12 @@ impl Controls {
                         ui.selectable_value(&mut index, *i, name);
                     }
                 });
+            let setup = self.setup.as_mut().unwrap();
+            let previous = setup.draft.camera_frame_rate;
+            camera_frame_rate_picker(ui, &mut setup.draft.camera_frame_rate);
+            if previous != setup.draft.camera_frame_rate {
+                setup.begin_calibration();
+            }
             if ui.button("Refresh cameras").clicked() {
                 self.refresh_cameras();
             }
@@ -149,7 +155,12 @@ impl Controls {
                 .clicked()
             {
                 drop(self.worker.take());
-                self.worker = Some(Worker::start(index, self.models.clone(), ui.ctx().clone()));
+                self.worker = Some(Worker::start(
+                    index,
+                    self.setup.as_ref().unwrap().draft.camera_frame_rate,
+                    self.models.clone(),
+                    ui.ctx().clone(),
+                ));
             }
             if ui
                 .add_enabled(running, egui::Button::new("Stop camera"))
@@ -236,6 +247,7 @@ impl Controls {
                         self.window.clone(),
                         self.models.clone(),
                         self.setup.as_ref().unwrap().draft.camera_index,
+                        self.setup.as_ref().unwrap().draft.camera_frame_rate,
                     ) {
                         Ok(app) => self.calibration = Some(app),
                         Err(e) => self.error = Some(e),
@@ -306,6 +318,8 @@ impl Controls {
         ui.label("Your choices stay on this PC.");
         ui.add_space(16.0);
         level_picker(ui, &mut self.settings.level_index);
+        ui.add_space(16.0);
+        camera_frame_rate_picker(ui, &mut self.settings.camera_frame_rate);
         ui.add_space(16.0);
         ui.heading("Minimap pulse");
         egui::ComboBox::from_label("Style")

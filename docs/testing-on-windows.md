@@ -210,12 +210,20 @@ No Rust, Python, model downloads or developer tools are needed on the test PC.
    Builds are unsigned:
    after confirming you downloaded the intended repository/commit, SmartScreen
    may require **More info → Run anyway**.
-4. Select your Logitech C270 and click **Connect camera**. Close Discord/OBS or
+4. Select your webcam and click **Connect camera**. Close Discord/OBS or
    other apps using the camera if it cannot open. Allow desktop camera access in
    Windows Settings → Privacy (or Privacy & security) → Camera.
 
-The requested format is 1280×720 MJPEG at 30 fps. The debug view shows **Face
-found**, whether the eyes are usable, raw eye/head features, observed fps, capture /
+In tray **Settings → Camera frame rate**, choose **Auto (60 if available)** or
+**30 fps**, then save. Auto prefers a reported MJPEG 60 fps mode at the highest
+resolution up to 1920×1080's pixel budget. If unavailable or negotiation fails,
+it falls back to 1280×720 MJPEG at 30 fps. The C270 keeps that existing mode.
+The 30 fps choice explicitly forces it; there is no resolution picker. Settings
+apply when the camera next connects in calibration, Quick check, glance tests
+and coaching. Restart an already-open diagnostics window after saving Settings.
+
+The debug view shows the **negotiated** resolution/format/rate, **Face
+found**, whether the eyes are usable, raw eye/head features, measured fps, capture /
 inference thread CPU time per frame, and heuristic tracking quality. The marker
 uses camera-space iris ratios: it is **not calibrated**, not a screen position,
 and not a minimap detection. No camera preview is shown or stored. Low quality,
@@ -224,7 +232,7 @@ unknown eyes, or low fps are reasons to adjust lighting and placement first.
 ### Headless camera check (about 3 seconds)
 
 Before the recording, close the debug window and other camera apps. In PowerShell
-in the extracted bundle directory, run this standalone option without other flags:
+in the extracted bundle directory, run:
 
 ```powershell
 .\lucas.exe --check-camera | Out-Host
@@ -232,13 +240,24 @@ $LASTEXITCODE
 ```
 
 The pipe waits for this Windows GUI-subsystem executable to finish. This opens
-camera **index 0** through the same `NokhwaCamera::open_c270` / `Camera::capture`
-path as the app, including acquisition timestamp validation. If several webcams
-are attached, disconnect the others so the C270 is index 0. No window, model
-inference, recording, or pixel output is involved; frames are cleared in RAM.
+the **saved selected camera** (index 0 before a camera is saved) through the same
+`NokhwaCamera::open_preferred` / `Camera::capture` path as the app, including
+acquisition timestamp validation and the saved frame-rate setting. With multiple
+webcams, save the intended camera through setup/calibration first. No window,
+model inference, recording, or pixel output is involved; frames are cleared in RAM.
 
-Output includes the negotiated width/height/format/fps (expected **1280×720 MJPEG
-30 fps**), frames received over about three seconds, effective fps (received
+To compare modes without changing saved Settings:
+
+```powershell
+.\lucas.exe --check-camera --camera-fps auto | Out-Host
+$LASTEXITCODE
+.\lucas.exe --check-camera --camera-fps 30 | Out-Host
+$LASTEXITCODE
+```
+
+Output includes the **negotiated** width/height/format/fps and camera index
+(expect **60 fps MJPEG** on a compatible camera in Auto; **1280×720 MJPEG 30 fps**
+for the fallback or a C270), frames received over about three seconds, effective fps (received
 frames divided by elapsed capture/decode time, excluding camera open), and
 minimum/median/maximum acquisition age in milliseconds measured just after
 capture/decode.
@@ -252,7 +271,10 @@ After the check, reopen diagnostics and reconnect the camera using
 **Real-camera verification is pending:** run this diagnostic from the PR's Windows
 CI artifact on the affected Windows PC and record its numeric output, exit code,
 and build commit before merging the camera fix. Linux unit tests and Windows CI
-builds alone do not confirm C270 driver behavior.
+builds alone do not confirm Insta360 or C270 driver behavior. Record both Auto
+and forced-30 output, including whether Auto actually negotiated 60 fps. A 60 fps
+negotiated mode does not guarantee 60 processed frames/s: decoding, inference,
+lighting and the camera driver can reduce measured throughput.
 
 ### Record the test (about 10 minutes)
 
@@ -300,6 +322,22 @@ tests do not establish real-webcam G2 acceptance.
 For in-app calibration and **Quick check**, follow the
 [calibration guide](../crates/lucas-app/README.md#in-app-calibration), including
 physical monitor measurements, saved alignment and when to recalibrate.
+
+To compare in-app calibration with the current tracker, close each window before
+starting the next run, connect the camera, confirm its negotiated mode and measured
+fps, then click **Start calibration**:
+
+```powershell
+.\lucas.exe --calibrate --camera-fps auto | Out-Host
+.\lucas.exe --calibrate --camera-fps 30 | Out-Host
+```
+
+The override applies to calibration, **Quick check** and the glance test in that
+window only; it never changes saved Settings. Omit it to use the saved preference.
+60 fps supplies more opportunities during a short glance, but each frame gets less
+light at night. If tracking degrades, try 30 fps and front lighting. Validation
+pass checks and glance dwell/sample/gap thresholds are unchanged. Record the
+validation metrics for both modes; real-webcam results remain pending until tested.
 
 ### Troubleshooting / development
 

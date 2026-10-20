@@ -22,7 +22,12 @@ pub struct CameraWorker {
     handle: Option<JoinHandle<()>>,
 }
 impl CameraWorker {
-    pub fn start(index: u32, models: PathBuf, origin: Instant) -> std::io::Result<Self> {
+    pub fn start(
+        index: u32,
+        frame_rate: lucas_store::CameraFrameRate,
+        models: PathBuf,
+        origin: Instant,
+    ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let latest = Arc::new(Mutex::new(None));
         let (signal, slot) = (stop.clone(), latest.clone());
@@ -31,7 +36,7 @@ impl CameraWorker {
             .spawn(move || {
                 let run = || -> lucas_gaze::Result<()> {
                     let backend = OrtBackend::new(VerifiedModels::load(&models)?)?;
-                    let camera = NokhwaCamera::open_c270(index)?;
+                    let camera = NokhwaCamera::open_preferred(index, frame_rate.prefer_60())?;
                     // Acquisition already uses the same monotonic clock as the
                     // app; never stamp inference completion as an observation.
                     let camera_origin = camera.timestamp_origin();

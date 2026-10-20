@@ -5,11 +5,13 @@ minimap classifier. Camera capture remains independent of calibration and decisi
 
 - `Camera::capture` fills caller-owned RGB8 storage; `false` means end-of-source.
 - `NokhwaCamera` (Windows/default `camera` feature) uses synchronous Media
-  Foundation capture, explicit 1280×720 MJPEG/30fps for the C270, pure-Rust JPEG
-  decoding, and below-normal priority on its calling thread. See
+  Foundation capture, MJPEG-only modes up to 1920×1080's pixel budget, pure-Rust
+  JPEG decoding, and below-normal priority on its calling thread. Auto prefers
+  the largest reported 60 fps mode; unavailable/rejected upgrades fall back to
+  1280×720 MJPEG/30fps. Forced 30 fps and the C270 retain that legacy mode. See
   [acquisition timing](#acquisition-timing) for clock mapping and rejected frames.
-  Unsupported modes return a recoverable error rather than silently changing
-  resolution/frame rate.
+  Explicit `open` requests still require an exact negotiated match; only
+  `open_preferred` retries the legacy mode. `mode()` reports the negotiated values.
 - `ImageCamera` reads existing still-image fixtures. `TraceGazeSource` replays
   numeric samples from an iterator; it is not a recorder or file-format promise.
 - `MediaPipeLandmarker<OrtBackend>` runs a CPU-only, one-thread pipeline with
@@ -65,7 +67,7 @@ and regression tests.
 use lucas_gaze::{GazeSource, MediaPipeLandmarker, WebcamGazeSource};
 use lucas_gaze::{camera::NokhwaCamera, models::VerifiedModels, runtime::OrtBackend};
 let models = VerifiedModels::load(std::path::Path::new("models"))?;
-let camera = NokhwaCamera::open_c270(0)?;
+let camera = NokhwaCamera::open_preferred(0, true)?; // false forces legacy 30 fps
 let landmarker = MediaPipeLandmarker::new(OrtBackend::new(models)?);
 let mut source = WebcamGazeSource::new(camera, landmarker)?;
 while let Some(sample) = source.next_sample()? {

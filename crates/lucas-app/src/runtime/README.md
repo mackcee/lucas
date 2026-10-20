@@ -70,8 +70,10 @@ see [Getting started](../../../../README.md#getting-started).
 ## Threads, eligibility and privacy
 
 `Runtime` is a portable loop tested without Win32. The tray/core ticks at
-approximately 30 Hz, a dedicated below-normal-priority thread owns synchronous
-camera acquisition and CPU inference, the API worker polls at about 1 Hz, and the
+an 8 ms polling interval in gaze mode (33 ms in timer mode), so a 60 fps camera
+is not throttled by a 30 Hz consumer. A dedicated below-normal-priority thread
+owns synchronous camera acquisition and CPU inference, using the saved Camera
+frame rate preference (Auto/30 fps). The API worker polls at about 1 Hz, and the
 overlay retains its own foreground-gated presentation thread. The camera has a
 single latest **numeric** sample slot, not a frame queue. Camera timing follows the
 [`lucas-gaze` acquisition contract](../../../lucas-gaze/README.md#acquisition-timing);

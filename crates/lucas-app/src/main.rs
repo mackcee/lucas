@@ -13,7 +13,7 @@ mod setup_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
-const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --check-camera\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\n--check-camera: headless 3-second camera index 0 check; prints format and timing only.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory] [--camera-fps auto|30]\n       lucas --check-runtime\n       lucas --check-camera [--camera-fps auto|30]\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\n--check-camera: headless 3-second selected-camera check; prints negotiated format and measured timing only.\n--camera-fps auto|30: diagnostic override for camera check, calibration, Quick check and glance test; does not change saved Settings.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -67,14 +67,21 @@ fn main() -> ExitCode {
         };
     }
 
-    let result = if args.iter().any(|flag| flag == "--check-camera") {
-        if args.len() != 1 {
-            eprintln!("Usage: lucas --check-camera (no other options)");
+    let (args, frame_rate) = match camera_options(args) {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("{error}");
             return ExitCode::from(2);
         }
-        camera_check::run()
+    };
+    let result = if args.iter().any(|flag| flag == "--check-camera") {
+        if args.len() != 1 {
+            eprintln!("Usage: lucas --check-camera [--camera-fps auto|30]");
+            return ExitCode::from(2);
+        }
+        camera_check::run(frame_rate)
     } else {
-        run()
+        run(args, frame_rate)
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -84,7 +91,42 @@ fn main() -> ExitCode {
         }
     }
 }
-fn run() -> Result<(), String> {
+/// Diagnostic overrides are process-local, never written to saved settings.
+fn camera_options(
+    args: Vec<std::ffi::OsString>,
+) -> Result<
+    (
+        Vec<std::ffi::OsString>,
+        Option<lucas_store::CameraFrameRate>,
+    ),
+    String,
+> {
+    let mut remaining = Vec::new();
+    let mut frame_rate = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--camera-fps" {
+            if frame_rate.is_some() {
+                return Err("--camera-fps supplied twice".into());
+            }
+            frame_rate = Some(
+                args.next()
+                    .and_then(|v| v.into_string().ok())
+                    .ok_or("--camera-fps needs auto or 30")?
+                    .parse()
+                    .map_err(str::to_owned)?,
+            );
+        } else {
+            remaining.push(arg);
+        }
+    }
+    Ok((remaining, frame_rate))
+}
+
+fn run(
+    args: Vec<std::ffi::OsString>,
+    frame_rate: Option<lucas_store::CameraFrameRate>,
+) -> Result<(), String> {
     let mut seconds = lucas_app::script::DEFAULT_SECONDS;
     let mut models = std::env::current_exe()
         .map_err(|e| e.to_string())?
@@ -93,7 +135,9 @@ fn run() -> Result<(), String> {
         .join("models");
     let mut check_runtime = false;
     let mut runtime_calibration = None;
-    let mut args = std::env::args().skip(1);
+    let mut args = args
+        .into_iter()
+        .map(|arg| arg.to_string_lossy().into_owned());
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--version" | "-V" => {
@@ -131,7 +175,7 @@ fn run() -> Result<(), String> {
     #[cfg(windows)]
     {
         if let Some(quick_snapshot) = runtime_calibration {
-            return if debug_ui::run_calibration(models, quick_snapshot)? {
+            return if debug_ui::run_calibration(models, quick_snapshot, frame_rate)? {
                 Ok(())
             } else {
                 Err("Calibration cancelled or failed; coaching remains paused".into())
@@ -144,11 +188,17 @@ fn run() -> Result<(), String> {
             println!("Pinned models and ONNX Runtime loaded successfully.");
             return Ok(());
         }
-        debug_ui::run(seconds, models)
+        debug_ui::run(seconds, models, frame_rate)
     }
     #[cfg(not(windows))]
     {
-        let _ = (seconds, models, check_runtime, runtime_calibration);
+        let _ = (
+            seconds,
+            models,
+            check_runtime,
+            runtime_calibration,
+            frame_rate,
+        );
         Err("the gaze debug window requires Windows; use cargo xtask replay <trace> here".into())
     }
 }
@@ -183,4 +233,37 @@ fn start_tray(timer: bool) {
 fn start_tray(_: bool) {
     eprintln!("LUCAS tray coaching requires Windows 10/11. Use --version for build information.");
     std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn diagnostic_camera_override_accepts_only_auto_or_30_without_persisting() {
+        let parse =
+            |args: &[&str]| camera_options(args.iter().map(std::ffi::OsString::from).collect());
+        for command in [
+            "--check-camera",
+            "--calibrate",
+            "--runtime-quick",
+            "--seconds",
+        ] {
+            let (args, rate) = parse(&[command, "--camera-fps", "30"]).unwrap();
+            assert_eq!(args, [command]);
+            assert_eq!(rate, Some(lucas_store::CameraFrameRate::Fps30));
+        }
+        assert_eq!(
+            parse(&["--camera-fps", "auto", "--calibrate"]).unwrap().1,
+            Some(lucas_store::CameraFrameRate::Auto)
+        );
+        assert_eq!(parse(&["--check-camera"]).unwrap().1, None);
+        for args in [
+            vec!["--camera-fps"],
+            vec!["--camera-fps", "60"],
+            vec!["--camera-fps", "0"],
+            vec!["--camera-fps", "auto", "--camera-fps", "30"],
+        ] {
+            assert!(parse(&args).is_err());
+        }
+    }
 }

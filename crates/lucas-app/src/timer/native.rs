@@ -659,7 +659,9 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         }
         // Sleeping is bounded; overlay has its own 16 ms foreground gate. The
         // preview additionally checks that same gate in its WM_TIMER handler.
-        thread::sleep(Duration::from_millis(33));
+        // Poll the single latest-sample slot faster than a 60 fps camera; a
+        // fixed 33 ms poll would discard half its observations. Never queue them.
+        thread::sleep(Duration::from_millis(if timer_mode { 33 } else { 8 }));
     }
     drop(alignment);
     if let Some((_, mut overlay)) = overlay {

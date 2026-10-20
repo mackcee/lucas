@@ -52,6 +52,7 @@ struct Collection {
 #[derive(Default)]
 pub struct Shared {
     pub latest: Option<Diagnostic>,
+    pub mode: Option<lucas_gaze::camera::CaptureMode>,
     pub error: Option<String>,
     pub saved: Option<PathBuf>,
     recording: Option<Recording>,
@@ -149,7 +150,7 @@ impl Shared {
             && presentation.phase == Phase::Hold
             && acquired.duration_since(*shown_at) >= Duration::from_millis(200)
             && let Some(target) = presentation.target
-            && c.observations.len() < 3000
+            && c.observations.len() < lucas_app::calibration::MAX_OBSERVATIONS
         {
             c.observations.push(lucas_app::calibration::observation(
                 target,
@@ -193,12 +194,17 @@ pub struct Worker {
     handle: Option<JoinHandle<()>>,
 }
 impl Worker {
-    pub fn start(index: u32, model_dir: PathBuf, context: eframe::egui::Context) -> Self {
+    pub fn start(
+        index: u32,
+        frame_rate: lucas_store::CameraFrameRate,
+        model_dir: PathBuf,
+        context: eframe::egui::Context,
+    ) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let stop = Arc::new(AtomicBool::new(false));
         let (state, signal) = (shared.clone(), stop.clone());
         let handle = std::thread::spawn(move || {
-            if let Err(error) = run(index, model_dir, &state, &signal, &context) {
+            if let Err(error) = run(index, frame_rate, model_dir, &state, &signal, &context) {
                 let mut state = state.lock().unwrap();
                 state.finish(EndReason::TrackingError);
                 state.error = Some(format!(
@@ -272,12 +278,14 @@ impl<L: Landmarker> Landmarker for ObservedLandmarker<L> {
 }
 fn run(
     index: u32,
+    frame_rate: lucas_store::CameraFrameRate,
     models: PathBuf,
     state: &Mutex<Shared>,
     stop: &AtomicBool,
     context: &eframe::egui::Context,
 ) -> trace::Result<()> {
-    let camera = NokhwaCamera::open_c270(index)?;
+    let camera = NokhwaCamera::open_preferred(index, frame_rate.prefer_60())?;
+    state.lock().unwrap().mode = Some(camera.mode());
     // Camera acquisition and displayed targets share Instant's monotonic clock.
     let camera_origin = camera.timestamp_origin();
     let raw = Arc::new(Mutex::new(Raw::default()));
@@ -303,11 +311,14 @@ fn run(
                     .into(),
             );
         }
-        recent.push_back(sample.timestamp);
-        while recent.len() > 60 {
+        // Measured processing throughput, not the negotiated rate or spacing
+        // of potentially delayed acquisition timestamps. Samples keep their
+        // original acquisition times for calibration and glance detection.
+        recent.push_back(received);
+        while recent.len() > 1 && received - recent[0] > Duration::from_secs(2) {
             recent.pop_front();
         }
-        let span = sample.timestamp - recent[0];
+        let span = received - recent[0];
         let fps = if span.is_zero() {
             0.0
         } else {
@@ -409,6 +420,56 @@ mod tests {
         assert!(!shared.is_recording());
         assert!(shared.saved.is_none());
         assert!(!shared.is_collecting());
+    }
+    #[test]
+    fn sixty_fps_collection_retains_late_validation_after_3000_observations() {
+        let started = Instant::now();
+        let mut shared = Shared::default();
+        shared.begin_calibration(started, Duration::from_secs(70));
+        let target = |id| Target {
+            id,
+            position: [0.5, 0.5],
+            kind: lucas_app::script::TargetKind::Elsewhere,
+        };
+        shared.present(
+            started,
+            Presentation {
+                phase: Phase::Hold,
+                target: Some(target(0)),
+            },
+        );
+        shared.present(
+            started + Duration::from_secs(60),
+            Presentation {
+                phase: Phase::Hold,
+                target: Some(target(1)),
+            },
+        );
+        for n in 0..4200 {
+            let timestamp = Duration::from_nanos(n * 1_000_000_000 / 60);
+            shared
+                .record(
+                    started + timestamp,
+                    Diagnostic {
+                        sample: GazeSample {
+                            timestamp,
+                            features: None,
+                            quality: 0.0,
+                        },
+                        raw: None,
+                        face_found: false,
+                        cpu_ms: 1.0,
+                        fps: 60.0,
+                        received: started + timestamp,
+                        luminance: 0.1,
+                    },
+                )
+                .unwrap();
+        }
+        let observations = shared.take_calibration();
+        assert!(observations.len() > 3000);
+        assert_eq!(observations.last().unwrap().target_id, 1);
+        assert!(!shared.is_recording());
     }
     #[test]
     fn successful_restart_clears_previous_recording_error() {

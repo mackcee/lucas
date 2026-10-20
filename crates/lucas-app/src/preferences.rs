@@ -58,6 +58,21 @@ pub fn level_picker(ui: &mut eframe::egui::Ui, index: &mut usize) {
     }
 }
 
+pub fn camera_frame_rate_picker(
+    ui: &mut eframe::egui::Ui,
+    rate: &mut lucas_store::CameraFrameRate,
+) {
+    use lucas_store::CameraFrameRate;
+    eframe::egui::ComboBox::from_label("Camera frame rate")
+        .selected_text(rate.label())
+        .show_ui(ui, |ui| {
+            for choice in [CameraFrameRate::Auto, CameraFrameRate::Fps30] {
+                ui.selectable_value(rate, choice, choice.label());
+            }
+        });
+    ui.label("Auto uses 60 fps when available. Choose 30 fps if tracking is worse in low light. Applies when the camera next connects.");
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SetupStep {
     #[default]

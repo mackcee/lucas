@@ -46,6 +46,58 @@ fn fitted() -> lucas_gaze::calibration::CalibrationModel {
     fit_session(&script, &observations).unwrap()
 }
 #[test]
+fn calibration_and_quick_check_cover_every_target_at_30_and_60fps() {
+    let script = CalibrationScript::new(
+        [1920, 1080],
+        MinimapSettings::default(),
+        &AlignmentStore::default(),
+        [531.0, 299.0],
+        650.0,
+    )
+    .unwrap();
+    for fps in [30, 60] {
+        let collect = |script: &CalibrationScript| {
+            (0..script.duration().as_secs() * fps)
+                .filter_map(|n| {
+                    let at = Duration::from_nanos(n * 1_000_000_000 / fps);
+                    let (step, _) = script.at(at)?;
+                    let target = step.target;
+                    let within = at - TARGET_TIME * target.id;
+                    if step.phase != Phase::Hold || within < SETTLE + Duration::from_millis(200) {
+                        return None;
+                    }
+                    Some(observation(
+                        target,
+                        sample(target.position, at.as_millis() as u64),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        let observations = collect(&script);
+        assert!(observations.len() <= MAX_OBSERVATIONS);
+        assert!(script.targets().iter().all(|t| {
+            observations
+                .iter()
+                .filter(|o| o.target_id == t.target.id)
+                .count()
+                >= 12
+        }));
+        let model = fit_session(&script, &observations).unwrap();
+        assert!(
+            model
+                .validation()
+                .passes(model.target_false_positive_rate())
+        );
+        let quick = CalibrationScript::quick(&model);
+        assert!(
+            quick_revalidate(&model, &collect(&quick))
+                .unwrap()
+                .passes(model.target_false_positive_rate())
+        );
+    }
+}
+
+#[test]
 fn quick_check_snapshot_rejects_replaced_weights_and_changed_cameras() {
     let model_a = fitted();
     let expected_a = quick_snapshot_id(&model_a, 0);
