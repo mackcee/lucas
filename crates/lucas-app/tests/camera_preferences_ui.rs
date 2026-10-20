@@ -70,7 +70,10 @@ fn camera_rate_clicks_persist_and_reopen_without_changing_other_preferences() {
         click(&context, &mut settings.camera_frame_rate, expected.label());
         assert_eq!(settings.camera_frame_rate, expected);
         store.save_settings(&settings).unwrap();
-        let reopened = Store::open_in(directory.path()).unwrap().load_settings().unwrap();
+        let reopened = Store::open_in(directory.path())
+            .unwrap()
+            .load_settings()
+            .unwrap();
         assert_eq!(reopened, settings);
         assert_eq!(reopened.camera_index, 2);
         assert_eq!(reopened.level_index, 3);
@@ -85,13 +88,15 @@ fn camera_rate_clicks_persist_and_reopen_without_changing_other_preferences() {
             std::fs::copy(
                 directory.path().join("settings.toml"),
                 evidence.join(format!("camera-rate-{name}.settings.toml")),
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
     if let Some(path) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
         std::fs::write(
             std::path::Path::new(&path).join("camera-rate-interactions.json"),
             serde_json::to_vec_pretty(&interactions).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
     }
 }
