@@ -90,11 +90,14 @@ freeze it; death/loading/end reset it. Sustained minimap viewing hides the pulse
 and does not create repeated checks. The core policy supplies level-dependent,
 jittered delays and the density cap, not a new app timer.
 
-The camera opens for a running game in gaze mode or a solo game, or for explicit
-setup tracking checks, calibration and diagnostics. Game end, API loss and exit
+Runtime capture requires an available calibration model and a running game in
+gaze mode or a solo game. Without a model, the tray continues ticking with
+**Calibration needed** and keeps runtime capture closed so recalibration remains
+available. Explicit setup tracking checks, calibration and diagnostics open their
+own capture independently of that requirement. Game end, API loss and exit
 release runtime capture; timer mode releases it outside solo play. Settings pauses
-capture; setup diagnostics and calibration wait for the runtime capture thread to
-release the device before opening their own capture.
+capture; setup diagnostics and calibration wait for the runtime worker to release
+the device before opening their own capture.
 Synchronous driver acquisition must return before shutdown can join the thread;
 a wedged camera driver remains a native hardware-test limitation.
 

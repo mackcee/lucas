@@ -117,7 +117,9 @@ and advisory databases.
 
 Install [Rust via rustup](https://rustup.rs/), then run from the repository root.
 The toolchain and required components are pinned in
-[`rust-toolchain.toml`](rust-toolchain.toml).
+[`rust-toolchain.toml`](rust-toolchain.toml). The CPU-only UniGaze setup/protocol
+checks also require Python 3.11 or newer; on Unix, the Rust IPC tests invoke
+`python3` from PATH. No Python ML packages or GPU are needed for these checks.
 
 ```sh
 cargo build --workspace
@@ -134,6 +136,7 @@ cargo xtask replay path/to/trace.jsonl
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+python3 -m unittest discover -s models/unigaze -p 'test_*.py'
 
 cargo install cargo-deny --locked
 cargo deny check

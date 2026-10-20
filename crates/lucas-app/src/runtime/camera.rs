@@ -1,4 +1,5 @@
-//! Source lifetime seam; production calls it only on its capture thread.
+//! Portable source-lifetime seam used by runtime tests. The Windows worker owns
+//! its ModelGazeSource directly; see native_camera.rs.
 use lucas_gaze::{GazeSample, GazeSource};
 
 pub struct CaptureSession<S> {

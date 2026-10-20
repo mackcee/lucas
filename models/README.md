@@ -36,7 +36,8 @@ Copyright The MediaPipe Authors / Google LLC, **Apache-2.0**; see
 format/precision representation, not weights through training. The bundle's
 blendshape model is not included or used in M4.1. Head pose is a weak-perspective
 similarity fit to seven MediaPipe canonical vertices, not camera-calibrated metric
-3D reconstruction. Calibration/classification is a later milestone.
+3D reconstruction. See the [calibration reference](../crates/lucas-gaze/README.md#per-user-calibration-m51)
+for the personal screen mapping and minimap decision.
 
 Reference decoder contracts:
 [detector graph](https://github.com/google-ai-edge/mediapipe/blob/v0.10.32/mediapipe/tasks/cc/vision/face_detector/face_detector_graph.cc),
@@ -45,12 +46,14 @@ Reference decoder contracts:
 
 ## Verify or convert (development only)
 
-Normal Rust builds/tests of the MediaPipe fallback need no Python or model download:
+These checks use the committed MediaPipe models, without model downloads. See the
+[root build guide](../README.md#build-and-check) for tool prerequisites, including
+Python for the UniGaze IPC tests run by `cargo test` on Unix:
 
 ```sh
 cargo xtask models verify
 cargo test -p lucas-gaze
-cargo test -p lucas-gaze --no-default-features # portable math/trace tests
+cargo test -p lucas-gaze --no-default-features # portable math/trace and IPC tests
 cargo bench -p lucas-gaze --bench pipeline
 ```
 

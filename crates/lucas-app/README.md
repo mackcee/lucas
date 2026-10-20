@@ -205,7 +205,9 @@ Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
 shows mean angular error, sensitivity/FPR and pass/fail. In standalone or tray
 calibration, only passing fits save weights/geometry/validation aggregates through
 `lucas-store` and update the saved camera selection; failures retain the previous
-model. First-run setup instead uses the [draft and Finish contract](src/runtime/README.md#before-play).
+saved profile on disk. Tray readiness follows the [runtime failure contract](src/runtime/README.md#before-play),
+not just the presence of that file. First-run setup instead uses the draft and
+Finish contract in the same runtime guide.
 Full calibration samples are discarded by default. For the separate opt-in
 export, its contents and privacy controls, see the
 [one-run diagnostic instructions](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).

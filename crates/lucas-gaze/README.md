@@ -85,8 +85,10 @@ while let Some(sample) = source.next_sample()? {
 # }
 ```
 
-Use `--no-default-features` for math/replay only. Default Linux builds run fixture
-inference but never open a live camera; the MVP capture backend is Windows only.
+Use `--no-default-features` to omit native camera and ONNX Runtime dependencies;
+math, replay and the local UniGaze child protocol remain available. Default Linux
+builds run fixture inference but never open a live camera; the MVP capture backend
+is Windows only.
 
 ## Per-user calibration (M5.1)
 

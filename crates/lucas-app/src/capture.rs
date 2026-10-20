@@ -32,7 +32,7 @@ pub struct Diagnostic {
     pub cpu_ms: f64,
     pub fps: f64,
     pub received: Instant,
-    /// Mean luma sampled in RAM; no pixels cross the capture-thread boundary.
+    /// Mean luma sampled in RAM; no pixels cross the UI/recorder boundary.
     pub luminance: f32,
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -124,7 +124,7 @@ impl Shared {
         Ok(())
     }
     /// Called when a new target is submitted to egui, not recomputed from the
-    /// capture thread's wall clock. Late frames retain the old displayed label.
+    /// inference worker's receipt time. Late frames retain the old displayed label.
     pub fn present(&mut self, at: Instant, presentation: Presentation) {
         if let Some(collection) = &mut self.collection
             && collection
