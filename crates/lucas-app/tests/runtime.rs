@@ -426,6 +426,58 @@ fn full_recalibration_revokes_readiness_until_fit_and_quick_check_succeed() {
 }
 
 #[test]
+fn missing_calibration_stops_camera_without_stopping_session_ticks() {
+    let model = fitted();
+    for live_client_gate in [true, false] {
+        for recalibrating in [true, false] {
+            let mut runtime = Runtime::new(Settings {
+                live_client_gate,
+                ..Settings::default()
+            })
+            .unwrap();
+            runtime
+                .poll(Duration::ZERO, Some(&snapshot(100.0, false, vec![])), 0)
+                .unwrap();
+            runtime.tick(Duration::ZERO, inputs(), None, 0).unwrap();
+            assert!(runtime.in_session());
+            assert!(!runtime.camera_wanted(true, true, false));
+            ready(&mut runtime, model.clone());
+            assert!(runtime.camera_wanted(true, true, false));
+
+            if recalibrating {
+                assert!(!runtime.begin_calibration().unwrap());
+            } else {
+                runtime.install_calibration(None).unwrap();
+            }
+            for ms in 1..=3 {
+                assert!(!runtime.camera_wanted(true, true, false));
+                let tick = runtime
+                    .tick(Duration::from_millis(ms), inputs(), None, ms)
+                    .unwrap();
+                assert_eq!(tick.status, Status::CalibrationNeeded);
+                assert!(tick.hide);
+                assert!(tick.pulse.is_none());
+                assert!(runtime.in_session());
+            }
+
+            runtime.install_calibration(Some(model.clone())).unwrap();
+            assert!(runtime.camera_wanted(true, true, false));
+            assert!(!runtime.camera_wanted(true, true, true));
+            assert_eq!(
+                runtime
+                    .tick(Duration::from_millis(4), inputs(), None, 4)
+                    .unwrap()
+                    .status,
+                Status::QuickCheckNeeded
+            );
+            runtime.revalidated(true).unwrap();
+            assert_eq!(runtime.calibration(), CalibrationState::Ready);
+            assert!(runtime.camera_wanted(true, true, false));
+        }
+    }
+}
+
+#[test]
 fn reconnect_after_window_loss_starts_a_revalidated_session_without_replaying_deaths() {
     let mut runtime = Runtime::new(Settings::default()).unwrap();
     let death = event(1, 99.0, "ChampionKill");
@@ -657,6 +709,9 @@ fn camera_lifetime_start_loss_reconnect_calibration_end_and_exit() {
             1,
         )
         .unwrap();
+    sync(&mut capture, &runtime, false);
+    assert_eq!(opens.load(Ordering::SeqCst), 0);
+    runtime.install_calibration(Some(fitted())).unwrap();
     sync(&mut capture, &runtime, false);
     sync(&mut capture, &runtime, false);
     assert_eq!(opens.load(Ordering::SeqCst), 1);

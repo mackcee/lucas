@@ -202,6 +202,7 @@ impl Runtime {
     pub fn camera_wanted(&self, window_exists: bool, gaze_mode: bool, calibrating: bool) -> bool {
         gaze_mode
             && !calibrating
+            && self.model.is_some()
             && self.session.is_some()
             && if self.settings.live_client_gate {
                 self.game.api_available()
