@@ -508,13 +508,14 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 )?;
             }
         }
+        let gaze_mode = (!timer_mode || gaze.runtime.solo_active()) && !setup_pending;
         let gaze_tick = gaze.tick(
             now,
             crate::runtime::Inputs {
                 window_exists: window.exists,
                 foreground: window.overlay_eligible(),
                 geometry_ready,
-                gaze_mode: (!timer_mode || gaze.runtime.solo_active()) && !setup_pending,
+                gaze_mode,
                 paused: timer.paused() || alignment.is_some() || setup_pending,
             },
         )?;
@@ -661,7 +662,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         // preview additionally checks that same gate in its WM_TIMER handler.
         // Poll the single latest-sample slot faster than a 60 fps camera; a
         // fixed 33 ms poll would discard half its observations. Never queue them.
-        thread::sleep(Duration::from_millis(if timer_mode { 33 } else { 8 }));
+        thread::sleep(Duration::from_millis(if gaze_mode { 8 } else { 33 }));
     }
     drop(alignment);
     if let Some((_, mut overlay)) = overlay {
