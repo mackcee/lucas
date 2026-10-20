@@ -165,6 +165,10 @@ impl CalibrationScript {
         ))
     }
 }
+/// Numeric-only memory bound: covers the entire 46-second script at 60 fps
+/// with headroom, including its final validation targets. Not a sampling quota.
+pub const MAX_OBSERVATIONS: usize = 6000;
+
 #[derive(Clone, Copy)]
 pub struct Observation {
     pub target_id: u32,
@@ -186,7 +190,7 @@ fn validate_observations(
     script: &CalibrationScript,
     observations: &[Observation],
 ) -> calibration::Result<()> {
-    if observations.len() > 3000
+    if observations.len() > MAX_OBSERVATIONS
         || observations.iter().any(|o| {
             script.targets().get(o.target_id as usize).is_none_or(|t| {
                 o.labelled.target != t.target.position

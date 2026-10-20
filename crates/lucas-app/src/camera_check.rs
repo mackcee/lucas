@@ -1,18 +1,23 @@
 //! Headless camera smoke check. Only format and aggregate timing leave RAM.
 
 #[cfg(windows)]
-pub fn run() -> Result<(), String> {
+pub fn run(frame_rate: Option<lucas_store::CameraFrameRate>) -> Result<(), String> {
+    let settings = lucas_store::Store::open()
+        .and_then(|s| s.load_settings())
+        .map_err(|e| format!("camera settings: {e}"))?;
+    let index = settings.camera_index;
+    let frame_rate = frame_rate.unwrap_or(settings.camera_frame_rate);
     // Keep camera creation, capture and drop on one dedicated thread, like the app.
-    std::thread::spawn(|| {
+    std::thread::spawn(move || {
         use lucas_gaze::camera::{Camera, NokhwaCamera};
         use std::time::Duration;
 
-        let mut camera =
-            NokhwaCamera::open_c270(0).map_err(|error| format!("camera open: {error}"))?;
+        let mut camera = NokhwaCamera::open_preferred(index, frame_rate.prefer_60())
+            .map_err(|error| format!("camera open: {error}"))?;
         let format = camera.format();
         let (width, height) = camera.dimensions();
         println!(
-            "Negotiated: {width}x{height} {:?} {} fps (camera index 0)",
+            "Negotiated: {width}x{height} {:?} {} fps (camera index {index})",
             format.format(),
             format.frame_rate()
         );
@@ -26,7 +31,7 @@ pub fn run() -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-pub fn run() -> Result<(), String> {
+pub fn run(_: Option<lucas_store::CameraFrameRate>) -> Result<(), String> {
     Err("--check-camera requires Windows 10/11".into())
 }
 

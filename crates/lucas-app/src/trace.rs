@@ -25,7 +25,7 @@ pub const FEATURE_NAMES: [&str; 10] = [
     "head_relative_distance",
 ];
 const MAX_LINE: u64 = 16 * 1024;
-const MAX_FRAMES: usize = 120_000; // At most one hour at 30fps, with headroom.
+const MAX_FRAMES: usize = 120_000; // Covers a maximum 600-second trace at 60 fps with headroom.
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ impl Header {
             || self.app_version.len() > 128
             || self.lighting_note.len() > 2048
             || self.camera.resolution.contains(&0)
-            || !(1..=30).contains(&self.camera.fps)
+            || !(1..=60).contains(&self.camera.fps)
             || !self.dpi_scale.is_finite()
             || !(0.5..=8.0).contains(&self.dpi_scale)
         {
@@ -171,7 +171,7 @@ impl<W: Write> TraceWriter<W> {
         self.previous = Some(timestamps);
         self.frames += 1;
         // Bound data loss on unexpected shutdown without flushing every frame.
-        if self.frames.is_multiple_of(30) {
+        if self.frames.is_multiple_of(self.header.camera.fps as usize) {
             self.output.flush()?;
         }
         Ok(())
@@ -418,6 +418,25 @@ mod tests {
             writer.frame(f).unwrap();
         }
         writer.finish(EndReason::Completed).unwrap()
+    }
+    #[test]
+    fn full_600_second_1080p_60fps_trace_roundtrips() {
+        let mut header = header();
+        header.camera.resolution = [1920, 1080];
+        header.camera.fps = 60;
+        header.script_seconds = 600;
+        let mut writer = TraceWriter::new(Vec::new(), header.clone()).unwrap();
+        for n in 0..36_000 {
+            let mut f = frame(0, None, None);
+            f.timestamp_ns = n * 1_000_000_000 / 60;
+            f.source_timestamp_ns = f.timestamp_ns + 123_000_000;
+            writer.frame(f).unwrap();
+        }
+        let bytes = writer.finish(EndReason::Completed).unwrap();
+        let trace = read_trace(bytes.as_slice()).unwrap();
+        assert_eq!(trace.header, header);
+        assert_eq!(trace.end.frames, 36_000);
+        assert!((summarize(&trace).unwrap().fps - 60.0).abs() < 0.001);
     }
     #[test]
     fn roundtrip_and_replay_summary() {

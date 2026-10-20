@@ -57,9 +57,10 @@ see [Getting started](../../../../README.md#getting-started).
   re-enable assistance during a solo game. Its stored `probe_game` flag produces
   the existing card's **Solo probe** label. Arming during play selects the next
   match, not the current one. Gate switches cannot turn a probe into assisted play.
-- **Settings…** exposes level, style, RGB colour and optional sound, plus data
-  folder and confirmed deletion. Settings/setup run in one child process; the
-  tray releases the camera and pauses coaching while it is open. Camera preview
+- For **Settings…** controls and camera frame-rate changes, see
+  [Getting started](../../../../README.md#getting-started).
+  Settings/setup run in one child process; the tray releases the camera and pauses
+  coaching while it is open. Camera preview
   and calibration share the debug capture code but have no trace-recording UI.
   Settings saves are reloaded when the window closes; style/colour/sound apply
   immediately, level at the next match. Other settings writers are disabled while
@@ -69,10 +70,13 @@ see [Getting started](../../../../README.md#getting-started).
 
 ## Threads, eligibility and privacy
 
-`Runtime` is a portable loop tested without Win32. The tray/core ticks at
-approximately 30 Hz, a dedicated below-normal-priority thread owns synchronous
-camera acquisition and CPU inference, the API worker polls at about 1 Hz, and the
-overlay retains its own foreground-gated presentation thread. The camera has a
+`Runtime` is a portable loop tested without Win32. The tray/core sleeps 8 ms
+between polls in effective gaze mode, including solo games even when timer mode
+is selected; otherwise it sleeps 33 ms. Setup pending disables effective gaze mode.
+This avoids imposing a 30 Hz consumer limit on a 60 fps camera. A dedicated
+below-normal-priority thread owns synchronous camera acquisition and CPU inference,
+using the saved camera frame-rate preference. The API worker polls at about 1 Hz,
+and the overlay retains its own foreground-gated presentation thread. The camera has a
 single latest **numeric** sample slot, not a frame queue. Camera timing follows the
 [`lucas-gaze` acquisition contract](../../../lucas-gaze/README.md#acquisition-timing);
 the worker expresses accepted acquisition times relative to the app's `Instant`

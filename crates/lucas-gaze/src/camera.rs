@@ -11,6 +11,48 @@ mod timestamp;
 const MAX_PIXELS: u32 = 1920 * 1080;
 pub const RING_CAPACITY: usize = 3;
 
+/// Numeric MJPEG mode, safe to expose without any camera pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaptureMode {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+}
+impl CaptureMode {
+    pub const FALLBACK: Self = Self {
+        width: 1280,
+        height: 720,
+        fps: 30,
+    };
+}
+
+/// Only reported MJPEG modes are supplied here. Auto upgrades to 60 fps,
+/// choosing the largest bounded image at that rate; 30 fps retains the C270 mode.
+#[cfg(any(test, all(windows, feature = "camera")))]
+fn preferred_mode(modes: impl Iterator<Item = CaptureMode>, prefer_60: bool) -> CaptureMode {
+    modes
+        .filter(|m| prefer_60 && m.fps == 60 && m.width > 0 && m.height > 0)
+        .filter(|m| {
+            m.width
+                .checked_mul(m.height)
+                .is_some_and(|p| p <= MAX_PIXELS)
+        })
+        .max_by_key(|m| (m.width * m.height, m.width))
+        .unwrap_or(CaptureMode::FALLBACK)
+}
+
+#[cfg(any(test, all(windows, feature = "camera")))]
+fn with_fallback<T>(
+    mode: CaptureMode,
+    mut open: impl FnMut(CaptureMode) -> Result<T>,
+) -> Result<T> {
+    match open(mode) {
+        Ok(camera) => Ok(camera),
+        Err(_) if mode != CaptureMode::FALLBACK => open(CaptureMode::FALLBACK),
+        Err(error) => Err(error),
+    }
+}
+
 /// Owned RGB8 storage. Intentionally not Clone, Serialize, or pixel-bearing Debug.
 /// Drop scrubs our allocation; OS/driver buffers and crash dumps are outside this
 /// guarantee. Applications must not enable process dumps containing camera RAM.
@@ -193,6 +235,38 @@ mod windows {
         pub fn open_c270(index: u32) -> Result<Self> {
             Self::open(index, 1280, 720, 30)
         }
+        /// Auto prefers a reported 60 fps MJPEG mode. Each negotiation attempt
+        /// owns a fresh device so a rejected mode cannot poison the 30 fps retry.
+        pub fn open_preferred(index: u32, prefer_60: bool) -> Result<Self> {
+            lower_thread_priority()?;
+            let mode = if prefer_60 {
+                let mut camera = MediaFoundationDevice::new(CameraIndex::Index(index))
+                    .map_err(|_| Error::CameraUnavailable)?;
+                let available = camera.compatible_format_list().unwrap_or_default();
+                preferred_mode(
+                    available
+                        .iter()
+                        .filter(|f| f.format() == FrameFormat::MJPEG)
+                        .map(|f| CaptureMode {
+                            width: f.width(),
+                            height: f.height(),
+                            fps: f.frame_rate(),
+                        }),
+                    true,
+                )
+            } else {
+                CaptureMode::FALLBACK
+            };
+            with_fallback(mode, |m| Self::open(index, m.width, m.height, m.fps))
+        }
+        pub fn mode(&self) -> CaptureMode {
+            let format = self.format();
+            CaptureMode {
+                width: format.width(),
+                height: format.height(),
+                fps: format.frame_rate(),
+            }
+        }
         /// Monotonic origin of acquisition timestamps, shared with displayed
         /// targets. Neither inference delays nor wall-clock changes move it.
         pub fn timestamp_origin(&self) -> Instant {
@@ -204,7 +278,7 @@ mod windows {
         }
         pub fn open(index: u32, width: u32, height: u32, fps: u32) -> Result<Self> {
             Frame::new(width, height)?;
-            if fps == 0 || fps > 30 {
+            if fps == 0 {
                 return Err(Error::InvalidFrame);
             }
             lower_thread_priority()?;
@@ -300,6 +374,86 @@ pub use windows::NokhwaCamera;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn auto_prefers_largest_reported_60fps_within_pixel_budget() {
+        let modes = [
+            CaptureMode {
+                width: 3840,
+                height: 2160,
+                fps: 60,
+            },
+            CaptureMode {
+                width: 1280,
+                height: 720,
+                fps: 60,
+            },
+            CaptureMode {
+                width: 1920,
+                height: 1080,
+                fps: 30,
+            },
+            CaptureMode {
+                width: 1920,
+                height: 1080,
+                fps: 60,
+            },
+            CaptureMode {
+                width: 1920,
+                height: 1080,
+                fps: 120,
+            },
+            CaptureMode {
+                width: u32::MAX,
+                height: 2,
+                fps: 60,
+            },
+            CaptureMode {
+                width: 0,
+                height: 1080,
+                fps: 60,
+            },
+        ];
+        assert_eq!(preferred_mode(modes.into_iter(), true), modes[3]);
+        assert_eq!(
+            preferred_mode(modes.into_iter(), false),
+            CaptureMode::FALLBACK
+        );
+        assert_eq!(preferred_mode([modes[1]].into_iter(), true), modes[1]);
+        assert_eq!(
+            preferred_mode([CaptureMode::FALLBACK, modes[2]].into_iter(), true),
+            CaptureMode::FALLBACK
+        );
+        assert_eq!(preferred_mode([].into_iter(), true), CaptureMode::FALLBACK);
+    }
+    #[test]
+    fn rejected_upgrade_retries_legacy_mode_and_propagates_failure() {
+        let preferred = CaptureMode {
+            width: 1920,
+            height: 1080,
+            fps: 60,
+        };
+        let mut attempts = Vec::new();
+        let result = with_fallback(preferred, |mode| {
+            attempts.push(mode);
+            if mode == preferred {
+                Err(Error::CameraUnavailable)
+            } else {
+                Ok(mode)
+            }
+        });
+        assert_eq!(result, Ok(CaptureMode::FALLBACK));
+        assert_eq!(attempts, [preferred, CaptureMode::FALLBACK]);
+        assert_eq!(
+            with_fallback(preferred, |_| Err::<(), _>(Error::CameraUnavailable)),
+            Err(Error::CameraUnavailable)
+        );
+        let mut count = 0;
+        let _ = with_fallback(CaptureMode::FALLBACK, |_| {
+            count += 1;
+            Err::<(), _>(Error::CameraUnavailable)
+        });
+        assert_eq!(count, 1);
+    }
     #[test]
     fn fixed_ring_reuses_and_scrubs_slots() {
         let mut ring = FrameRing::new(2, 2).unwrap();

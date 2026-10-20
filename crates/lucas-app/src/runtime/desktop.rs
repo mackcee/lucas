@@ -119,7 +119,9 @@ impl Desktop {
         Ok(())
     }
     fn reload(&mut self) -> Result<()> {
-        self.runtime.settings.camera_index = Store::open()?.load_settings()?.camera_index;
+        let settings = Store::open()?.load_settings()?;
+        self.runtime.settings.camera_index = settings.camera_index;
+        self.runtime.settings.camera_frame_rate = settings.camera_frame_rate;
         let model = if let Some((screen, map)) = &self.geometry {
             calibration::load(&Store::open()?, screen, *map).unwrap_or(None)
         } else {
@@ -219,6 +221,7 @@ impl Desktop {
         } else if self.camera.is_none() {
             self.camera = Some(CameraWorker::start(
                 self.runtime.settings().camera_index,
+                self.runtime.settings().camera_frame_rate,
                 self.models.clone(),
                 self.origin,
             )?);

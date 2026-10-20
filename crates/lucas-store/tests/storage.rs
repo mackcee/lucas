@@ -74,6 +74,7 @@ fn settings_defaults_roundtrip_and_missing_nested_fields() {
     assert_eq!(store.load_settings().unwrap(), Settings::default());
     let mut settings = Settings {
         camera_index: 2,
+        camera_frame_rate: CameraFrameRate::Fps30,
         level_index: 3,
         ..Settings::default()
     };
@@ -89,6 +90,7 @@ fn settings_defaults_roundtrip_and_missing_nested_fields() {
     .unwrap();
     let loaded = store.load_settings().unwrap();
     assert_eq!(loaded.camera_index, 4);
+    assert_eq!(loaded.camera_frame_rate, CameraFrameRate::Auto);
     assert_eq!(loaded.pulse.colour_rgb, [255, 191, 0]);
     assert!(loaded.pulse.sound && loaded.live_client_gate);
     assert_eq!(loaded.level_index, 1);
@@ -97,6 +99,12 @@ fn settings_defaults_roundtrip_and_missing_nested_fields() {
         store.load_settings(),
         Err(StoreError::Schema { .. })
     ));
+    std::fs::write(
+        dir.path().join("settings.toml"),
+        "camera_frame_rate = '120'\n",
+    )
+    .unwrap();
+    assert!(store.load_settings().is_err());
     std::fs::write(dir.path().join("settings.toml"), "pulse = [").unwrap();
     assert!(store.load_settings().is_err());
 }

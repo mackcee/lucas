@@ -22,10 +22,18 @@ fn trace_directory() -> Result<PathBuf, String> {
         .ok_or("LOCALAPPDATA is not set; cannot save a trace".into())
 }
 
-pub fn run(seconds: u64, models: PathBuf) -> Result<(), String> {
-    run_impl(seconds, models, None, None).map(|_| ())
+pub fn run(
+    seconds: u64,
+    models: PathBuf,
+    frame_rate: Option<lucas_store::CameraFrameRate>,
+) -> Result<(), String> {
+    run_impl(seconds, models, None, None, frame_rate).map(|_| ())
 }
-pub fn run_calibration(models: PathBuf, quick_snapshot: Option<String>) -> Result<bool, String> {
+pub fn run_calibration(
+    models: PathBuf,
+    quick_snapshot: Option<String>,
+    frame_rate: Option<lucas_store::CameraFrameRate>,
+) -> Result<bool, String> {
     run_impl(
         600,
         models,
@@ -35,6 +43,7 @@ pub fn run_calibration(models: PathBuf, quick_snapshot: Option<String>) -> Resul
             RunKind::Calibrate
         }),
         quick_snapshot,
+        frame_rate,
     )
 }
 fn run_impl(
@@ -42,7 +51,12 @@ fn run_impl(
     models: PathBuf,
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
+    frame_rate: Option<lucas_store::CameraFrameRate>,
 ) -> Result<bool, String> {
+    let settings = lucas_store::Store::open()
+        .and_then(|s| s.load_settings())
+        .map_err(|e| e.to_string())?;
+    let frame_rate = frame_rate.unwrap_or(settings.camera_frame_rate);
     let passed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let result = passed.clone();
     let options = eframe::NativeOptions {
@@ -74,6 +88,7 @@ fn run_impl(
                 models,
                 cameras: Vec::new(),
                 selected: 0,
+                frame_rate,
                 worker: None,
                 lighting: String::new(),
                 consent: false,
@@ -162,6 +177,7 @@ pub(crate) struct DebugApp {
     models: PathBuf,
     cameras: Vec<Camera>,
     selected: usize,
+    frame_rate: lucas_store::CameraFrameRate,
     worker: Option<Worker>,
     lighting: String,
     consent: bool,
@@ -185,6 +201,7 @@ impl DebugApp {
         window: std::sync::Arc<winit::window::Window>,
         models: PathBuf,
         camera: u32,
+        frame_rate: lucas_store::CameraFrameRate,
     ) -> Result<Self, String> {
         let handle = window.primary_monitor().ok_or("main monitor unavailable")?;
         let monitor = Monitor {
@@ -198,6 +215,7 @@ impl DebugApp {
             models,
             cameras: Vec::new(),
             selected: 0,
+            frame_rate,
             worker: None,
             lighting: String::new(),
             consent: false,
@@ -441,6 +459,9 @@ impl DebugApp {
             }
             let script = Script::new(self.seconds, self.monitor.resolution, minimap.settings())
                 .map_err(str::to_owned)?;
+            let mode = state
+                .mode
+                .ok_or("Camera mode unavailable; reconnect the camera")?;
             let header = Header {
                 schema_version: 1,
                 app_version: env!("CARGO_PKG_VERSION").into(),
@@ -452,8 +473,8 @@ impl DebugApp {
                     .map_err(|_| "clock overflow")?,
                 camera: CameraInfo {
                     name: self.cameras[self.selected].name.clone(),
-                    resolution: [1280, 720],
-                    fps: 30,
+                    resolution: [mode.width, mode.height],
+                    fps: mode.fps,
                 },
                 monitor_resolution: self.monitor.resolution,
                 dpi_scale: scale as f64,
@@ -647,12 +668,16 @@ impl DebugApp {
                 });
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!running && !self.cameras.is_empty(), egui::Button::new("Connect camera")).clicked() {
-                        self.worker = Some(Worker::start(self.cameras[self.selected].index, self.models.clone(), context.clone()));
+                        self.worker = Some(Worker::start(self.cameras[self.selected].index, self.frame_rate, self.models.clone(), context.clone()));
                         self.error = None;
                     }
                     if ui.add_enabled(running, egui::Button::new("Stop camera")).clicked() { self.worker.as_ref().unwrap().stop(); }
-                    ui.label("1280 × 720 · MJPEG · 30 fps requested");
+                    if let Some(mode) = self.worker.as_ref().and_then(|w| w.shared.lock().ok()?.mode) {
+                        ui.label(format!("{} × {} · MJPEG · {} fps negotiated", mode.width, mode.height, mode.fps));
+                    }
                 });
+                ui.label(format!("Camera frame rate: {}. Change in tray Settings, or use --camera-fps auto|30 for this diagnostic run.", self.frame_rate.label()));
+                ui.label("30 fps can help in low light. Auto uses 60 fps when available.");
                 if self.cameras.is_empty() { ui.label("Connect a webcam and allow desktop apps under Windows Settings → Privacy → Camera."); }
                 ui.add_space(12.0);
                 let fresh = running && latest.is_some_and(|d| d.received.elapsed() < Duration::from_secs(1));

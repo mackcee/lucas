@@ -803,6 +803,19 @@ fn historical_deaths_and_window_only_summary_do_not_invent_gaze_or_death_data() 
 }
 
 #[test]
+fn saved_camera_rate_is_available_to_the_next_capture_session() {
+    let mut runtime = Runtime::new(Settings::default()).unwrap();
+    assert!(runtime.settings().camera_frame_rate.prefer_60());
+    let mut settings = runtime.settings().clone();
+    settings.camera_frame_rate = lucas_store::CameraFrameRate::Fps30;
+    runtime.update_preferences(&settings).unwrap();
+    assert!(!runtime.settings().camera_frame_rate.prefer_60());
+    settings.camera_frame_rate = lucas_store::CameraFrameRate::Auto;
+    runtime.update_preferences(&settings).unwrap();
+    assert!(runtime.settings().camera_frame_rate.prefer_60());
+}
+
+#[test]
 fn saved_level_waits_for_next_match_even_across_gate_changes() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open_in(dir.path()).unwrap();
