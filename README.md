@@ -69,12 +69,21 @@ can also be built and checked on Linux. Builds will initially be unsigned.
 3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
    move through 8 → 6 → 5 s. Fade levels keep the 5 s goal but delay and soften the
    help, make it intermittent, then turn it off. A saved level applies **next game**,
-   never mid-game. Settings also offers pulse style, colour and sound (off by default),
-   **Open data folder** and confirmed **Delete all data**.
+   never mid-game. Settings also offers camera frame rate, pulse style, colour and
+   sound (off by default), **Open data folder** and confirmed **Delete all data**.
 4. **Try a solo game.** Arm **Next game solo (no pulses)** before starting. The tray
    tooltip announces it when armed and when play starts. That game has no visual or
    sound pulses, but still measures your checks; its post-game card says **Solo probe**.
    The choice is one-shot, not an automatic schedule, and is cleared on app exit.
+
+**Camera frame rate:** in first-run camera setup or tray **Settings…**, choose
+**Auto (60 if available)** (the default) or **30 fps**, then finish setup or save.
+The [capture contract](crates/lucas-gaze/README.md) describes resolution selection
+and fallback; there is no resolution picker. The saved choice applies when the
+camera next connects in calibration, Quick check, glance tests and coaching.
+Restart already-open diagnostics after saving Settings. For temporary diagnostic
+overrides and low-light comparisons, follow the
+[Windows camera guide](docs/testing-on-windows.md#record-the-test-about-10-minutes).
 
 For the three-game MVP check, follow [G3](docs/testing-on-windows.md#g3--three-game-mvp-check).
 

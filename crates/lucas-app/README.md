@@ -90,7 +90,9 @@ single latest numeric sample, so it cannot queue camera frames. Trace writing
 happens on the capture thread, independently of the UI refresh rate. Samples
 acquired before the first target presentation or outside the script duration
 are not written. CPU time is capture/inference **thread CPU time**, not blocking
-camera wall time. FPS is measured over the latest 60 acquisition timestamps.
+camera wall time. Live diagnostic FPS measures completed capture/inference samples
+received within a rolling two-second window, not the negotiated camera rate.
+Acquisition timestamps still label samples and determine offline replay FPS.
 The quality value is a heuristic, never a claim about detection accuracy.
 
 ## JSON-lines schema v1

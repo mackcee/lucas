@@ -214,13 +214,9 @@ No Rust, Python, model downloads or developer tools are needed on the test PC.
    other apps using the camera if it cannot open. Allow desktop camera access in
    Windows Settings → Privacy (or Privacy & security) → Camera.
 
-In tray **Settings → Camera frame rate**, choose **Auto (60 if available)** or
-**30 fps**, then save. Auto prefers a reported MJPEG 60 fps mode at the highest
-resolution up to 1920×1080's pixel budget. If unavailable or negotiation fails,
-it falls back to 1280×720 MJPEG at 30 fps. The C270 keeps that existing mode.
-The 30 fps choice explicitly forces it; there is no resolution picker. Settings
-apply when the camera next connects in calibration, Quick check, glance tests
-and coaching. Restart an already-open diagnostics window after saving Settings.
+For the saved **Camera frame rate** preference and when changes apply, see
+[Getting started](../README.md#getting-started); resolution selection and fallback
+are defined by the [capture contract](../crates/lucas-gaze/README.md).
 
 The debug view shows the **negotiated** resolution/format/rate, **Face
 found**, whether the eyes are usable, raw eye/head features, measured fps, capture /
@@ -255,10 +251,9 @@ $LASTEXITCODE
 $LASTEXITCODE
 ```
 
-Output includes the **negotiated** width/height/format/fps and camera index
-(expect **60 fps MJPEG** on a compatible camera in Auto; **1280×720 MJPEG 30 fps**
-for the fallback or a C270), frames received over about three seconds, effective fps (received
-frames divided by elapsed capture/decode time, excluding camera open), and
+Output includes the **negotiated** width/height/format/fps and camera index,
+frames received over about three seconds, effective fps (received frames divided
+by elapsed capture/decode time, excluding camera open), and
 minimum/median/maximum acquisition age in milliseconds measured just after
 capture/decode.
 Exit **0** means capture completed; a nonzero exit prints the failing open/capture
