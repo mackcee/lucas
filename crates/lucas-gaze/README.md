@@ -134,8 +134,10 @@ unseen-population false-positive bound. `cargo xtask eval` measures held-out
 
 There is no frame file writer, network inference or pixel logging. RGB travels
 only through a local anonymous pipe to the owned UniGaze child when selected. `Frame` debug
-output is redacted and owned RGB allocations are scrubbed on clear/drop. Model
-input staging buffers are scrubbed after inference. Drivers, decoders, and runtime
+output is redacted and owned RGB allocations are scrubbed on clear/drop.
+MediaPipe input staging buffers are scrubbed after inference; the
+[UniGaze runtime contract](../../models/unigaze/README.md#runtime-contract) describes
+child-buffer handling and temporary-copy limits. Drivers, decoders, and runtime
 arenas may allocate transient working memory; this is not a claim of OS-level
 locked memory or protection from swap/process dumps. Do not configure a crash
 reporter to upload process memory. MediaPipe models are loaded with compiled SHA-256 verification and telemetry

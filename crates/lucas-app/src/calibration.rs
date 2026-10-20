@@ -178,8 +178,8 @@ pub struct Observation {
     pub target_id: u32,
     pub labelled: LabelledSample,
 }
-/// Called by the capture thread only after matching acquisition time to the
-/// displayed target, not a UI poll of its latest frame. Unknowns are retained.
+/// Called by the inference/recording worker only after matching acquisition time
+/// to the displayed target, not a UI poll of its latest frame. Unknowns are retained.
 pub fn observation(target: Target, sample: GazeSample) -> Observation {
     Observation {
         target_id: target.id,

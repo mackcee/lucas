@@ -70,10 +70,11 @@ see [Getting started](../../../../README.md#getting-started).
 ## Threads, eligibility and privacy
 
 `Runtime` is a portable loop tested without Win32. The tray/core ticks at
-approximately 30 Hz, a dedicated below-normal-priority thread owns synchronous
-camera acquisition and CPU inference, the API worker polls at about 1 Hz, and the
-overlay retains its own foreground-gated presentation thread. The camera has a
-single latest **numeric** sample slot, not a frame queue. Camera timing follows the
+approximately 30 Hz, a dedicated inference worker uses the selected
+[`ModelGazeSource`](../../../lucas-gaze/README.md) fed by `LatestCamera`, the API
+worker polls at about 1 Hz, and the overlay retains its own foreground-gated
+presentation thread. The runtime receives a single latest **numeric** sample
+slot, not a frame queue. Camera timing follows the
 [`lucas-gaze` acquisition contract](../../../lucas-gaze/README.md#acquisition-timing);
 the worker expresses accepted acquisition times relative to the app's `Instant`
 origin. Each frame is consumed once by

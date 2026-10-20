@@ -127,13 +127,15 @@ cargo xtask eval --calibration calibration-session.jsonl unseen-session.jsonl
 cargo xtask eval --width-mm 598 --height-mm 336 --distance-mm 650 glance.jsonl
 ```
 
-Reads the existing recorder's JSON-lines v1 format; writes no files or weights.
+Reads the recorder's [JSON-lines format](../crates/lucas-app/README.md#json-lines-schema-v2-v1-remains-readable);
+writes no files or weights.
 Without a separate calibration trace, each class's target occurrences are split
 chronologically into 50% fit, 25% threshold-validation, and the rest held-out test
 (rounding fit/validation down). With `--calibration`, 75%/25% of that file's
 occurrences fit/validate the model and **all** other files' trials are evaluated.
 Use a genuinely independent recording, not a copy of the fitting file. Different
-monitor resolutions or minimap settings are rejected. Multi-file results are
+monitor resolutions, minimap settings or gaze sources between calibration and
+evaluation are rejected. Multi-file results are
 reported independently, never pooled across camera positions or people.
 
 The first 300 ms of each displayed hold/focus return are excluded for saccade and

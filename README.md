@@ -50,8 +50,9 @@ For offline recording evaluation, see the [G2 evaluator](xtask/README.md#g2-cali
 **UniGaze-H CUDA tracking** is now available with the robust SFD/FAN face frontend.
 It becomes the default after the [one-time NVIDIA setup](docs/testing-on-windows.md#one-time-unigaze-setup-nvidia-cuda);
 MediaPipe remains selectable. Calibration asks for natural movement and uses a
-rectangular minimap decision. **Real-webcam calibration and G2 acceptance remain
-pending**; adding a stronger model is not a claim that the accuracy gate is met.
+rectangular minimap decision. See the [target-PC results](models/unigaze/README.md#target-pc-headless-verification-2026-10-20)
+for calibration evidence and remaining accuracy limits; adding a stronger model
+is not a claim that the G2 accuracy gate is met.
 
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
@@ -102,7 +103,8 @@ The opt-in debug glance test additionally
 stores numeric eye/head features, quality, target labels and timestamps, plus a
 camera/monitor metadata header and your lighting note. **No images are stored.**
 See the [recording guide](docs/testing-on-windows.md#record-the-test-about-10-minutes)
-for local trace location, deletion and explicit sharing.
+for local trace location, deletion and explicit sharing. Full calibration also
+supports a separate [explicit numeric diagnostic export](docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).
 The tray persists alignment profiles and user-requested numeric geometry reports
 in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only
 mode disables polling (an already-running request may finish).

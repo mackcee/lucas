@@ -1,8 +1,9 @@
 # UniGaze-H local CUDA tracker
 
 This optional install adds the official **UniGaze-H/14 joint** model (632M
-parameters) with the **SFD + 2D-FAN** GPU face frontend. It does not establish G2
-accuracy. User webcam trials have not passed calibration; G2 acceptance is **pending**.
+parameters) with the **SFD + 2D-FAN** GPU face frontend. See the
+[target-PC results](#target-pc-headless-verification-2026-10-20) for verification
+and accuracy limits.
 
 ## One-time Windows install
 
@@ -129,8 +130,15 @@ excludes camera acquisition/IPC and is not an in-game performance guarantee.
 The three public/synthetic FP16-vs-FP32 camera-ray deviations were below 0.023°;
 RGB/BGR warp parity was exact. Actual CUDA pipe tests preserved timestamps and
 returned unknown for a blank frame. Missing CUDA, corrupt assets and a missing
-install each failed explicitly with exit 1. **Real-webcam calibration and G2
-acceptance remain pending.** For low-sensitivity trials, use the explicit
+install each failed explicitly with exit 1.
+
+Separately, the user reported real-webcam calibration with an Insta360 Link 2C
+Pro: an initial failure at 1.45° mean error and 15.4% minimap sensitivity, then a
+pass at 0.60° and 100.0% sensitivity. Both runs reported 0.00% elsewhere false
+positives and 100% usable frames. These short calibration results are not
+held-out glance-event evaluation: **G2 acceptance remains pending**, and no
+configuration has yet met the [G2 gate](../../xtask/README.md#g2-calibration-and-glance-evaluation).
+For low-sensitivity trials, use the explicit
 [numeric calibration export](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in)
 to distinguish settling, mapping/geometry and threshold failures; aggregate error
 alone cannot establish the cause.

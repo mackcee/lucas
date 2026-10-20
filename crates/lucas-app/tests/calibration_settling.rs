@@ -184,6 +184,114 @@ fn low_mean_error_also_can_mask_local_bias_without_threshold_inflation() {
             .passes(model.target_false_positive_rate())
     );
 }
+/// Exercise the persisted UniGaze-to-coaching seam, not just the fit in memory.
+/// Optional artifacts contain synthetic numbers only, never webcam acceptance.
+#[test]
+fn unigaze_settling_fit_persists_and_drives_coaching() {
+    use lucas_core::GazeState;
+    use lucas_gaze::{decision::CalibratedDetector, features::FeatureKind};
+
+    let (script, rows) = replay(true, 200);
+    let model = fit_session(&script, &rows).unwrap();
+    assert!(
+        model
+            .validation()
+            .passes(model.target_false_positive_rate())
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let screen = lucas_store::ScreenGeometry {
+        left: 0,
+        top: 0,
+        width: 3840,
+        height: 2160,
+        scale_factor: 1.0,
+    };
+    {
+        let store = lucas_store::Store::open_in(directory.path()).unwrap();
+        save(&store, &model, screen.clone(), 1).unwrap();
+    }
+    let store = lucas_store::Store::open_in(directory.path()).unwrap();
+    let restored = load(&store, &screen, script.screen().minimap)
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored, model);
+    assert_eq!(restored.feature_kind(), FeatureKind::UniGaze);
+
+    // A later failed calibration must not replace the usable saved model.
+    let (hidden_script, hidden_rows) = replay(false, 200);
+    let failed = fit_session(&hidden_script, &hidden_rows).unwrap();
+    assert!(save(&store, &failed, screen.clone(), 2).is_err());
+    assert_eq!(
+        load(&store, &screen, script.screen().minimap).unwrap(),
+        Some(model.clone())
+    );
+
+    let [left, top, right, bottom] = model.screen().minimap;
+    let point = [(left + right) / 2.0, (top + bottom) / 2.0];
+    let mut detector = CalibratedDetector::new(restored).unwrap();
+    let mut events = Vec::new();
+    for (ms, known, starts) in [
+        (0, true, false),
+        (50, true, false),
+        (99, true, false),
+        (100, true, true),
+        (150, false, false),
+        (200, true, false),
+        (250, true, false),
+        (300, true, true),
+    ] {
+        let sample = GazeSample {
+            timestamp: Duration::from_millis(ms),
+            quality: if known { 0.9 } else { 0.0 },
+            features: known.then_some(GazeFeatures::UniGaze([
+                ((point[1] - 0.5) * 0.5) as f32,
+                ((point[0] - 0.5) * 0.7) as f32,
+                0.2,
+                0.2,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                650.0,
+            ])),
+        };
+        let update = detector.observe(sample).unwrap();
+        assert_eq!(update.check_started, starts, "timestamp {ms}");
+        if !known {
+            assert_eq!(update.state, GazeState::Unknown);
+        }
+        events.push(serde_json::json!({
+            "timestamp_ms": ms, "known": known,
+            "state": format!("{:?}", update.state), "check_started": update.check_started,
+        }));
+    }
+
+    if let Some(evidence) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
+        let evidence = std::path::PathBuf::from(evidence);
+        std::fs::create_dir_all(&evidence).unwrap();
+        std::fs::copy(
+            directory.path().join("calibration.json"),
+            evidence.join("synthetic-unigaze-calibration.json"),
+        )
+        .unwrap();
+        let report = serde_json::json!({
+            "synthetic_features_not_webcam_or_gpu_acceptance": true,
+            "calibration_duration_seconds": script.duration().as_secs(),
+            "persisted_feature_kind": model.feature_kind(),
+            "visible_settling": lucas_app::calibration_diagnostics::report(&script, &rows, &[], Some(&model), None, None).unwrap()["model"],
+            "hidden_settling": lucas_app::calibration_diagnostics::report(&hidden_script, &hidden_rows, &[], Some(&failed), None, None).unwrap()["model"],
+            "failed_calibration_preserved_saved_weights": true,
+            "coaching_events": events,
+        });
+        std::fs::write(
+            evidence.join("synthetic-unigaze-coaching.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+}
+
 #[test]
 fn numeric_export_is_opt_in_and_reconstructs_the_failed_model() {
     use lucas_app::calibration_diagnostics as diag;

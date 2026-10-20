@@ -1,4 +1,4 @@
-//! A dedicated camera/inference thread with a single numeric latest-sample slot.
+//! Inference worker with a single numeric latest-sample slot, fed by LatestCamera.
 //! Disabling waits for acquisition to finish and drops the source before handing
 //! the device to calibration. No RGB queue, recording or persistence exists here.
 use lucas_gaze::{

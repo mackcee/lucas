@@ -252,9 +252,9 @@ Remove-Item Env:LUCAS_GAZE_SOURCE -ErrorAction SilentlyContinue
 ```
 
 `LUCAS_GAZE_SOURCE=unigaze` instead requires UniGaze and errors if missing. Keep
-the same selection for calibration, quick check, recording and play. Saved
-MediaPipe/old half-plane calibrations cannot be reused with UniGaze; repeat the
-full calibration after changing source, camera position, lighting or map geometry.
+the same selection for calibration, quick check, recording and play. Follow the
+[calibration guide](../crates/lucas-app/README.md#in-app-calibration) for saved-profile
+compatibility and when to repeat calibration.
 
 ### Headless GPU model check (no camera)
 
@@ -272,9 +272,9 @@ return early or show no output in interactive PowerShell, even with `| Out-Host`
 The logs remain under `models\unigaze\checks`. `--models <directory>` can select another model root;
 do not combine this diagnostic with camera or window modes.
 
-This is a runtime/latency check, **not an accuracy result**. User webcam trials
-have not yet passed calibration; G2 acceptance remains **pending**. No tested configuration has yet
-met G2 (at least 90% glances detected and at most one false start/minute).
+This is a runtime/latency check, **not an accuracy result**. See the
+[target-PC results](../models/unigaze/README.md#target-pc-headless-verification-2026-10-20)
+for reported webcam calibration evidence and its limits.
 
 ### Calibrate with natural movement
 
@@ -284,19 +284,12 @@ minutes; model warmup completes before the camera opens. Enter your actual scree
 dimensions (for the investigated 27-inch display: 597×336 mm, 3840×2160) and your
 viewing distance (about 650 mm in that setup). Do not substitute Windows DPI.
 
-The flow remains about **46 seconds**. Each dot is visible during the 500 ms
-settling phase; collection starts after that phase plus a 200 ms guard. Previously
-the dot was hidden during settling, so the first accepted samples could still
-reflect the preceding fixation/filter transition. Follow the dots comfortably; after the
-initial grid, shift naturally when prompted: lean, turn, and move a little closer
-or farther, without looking away from the dots. Both map and elsewhere targets
-occur during movement. Just-outside targets above and beside the map check the
-two in-screen boundaries; flipped maps are mirrored. The personal screen mapping
-uses a **four-sided rectangular minimap score**, not a half-plane. The 100 ms
-dwell and all calibration/G2 pass thresholds are unchanged. Failed validation
-retains the previous profile. Low mean error and high usable-frame coverage do not
-prove that map/elsewhere samples are separable; do not loosen thresholds to hide
-that failure. Quick check and glance recording use the same source.
+Follow the [in-app calibration guide](../crates/lucas-app/README.md#in-app-calibration)
+for target timing, natural movement, validation and saved-profile behavior. The
+[calibration reference](../crates/lucas-gaze/README.md#per-user-calibration-m51)
+explains the rectangular score and unchanged dwell/pass thresholds. Low mean
+error and high usable-frame coverage do not prove that map/elsewhere samples
+are separable; do not loosen thresholds to hide that failure.
 
 ### One-run numeric calibration diagnostics (explicit opt-in)
 

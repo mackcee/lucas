@@ -89,7 +89,7 @@ Starting the camera alone writes no trace. Every new recording requires consent.
 A below-normal-priority thread captures into a single replaceable frame slot;
 a separate worker infers the latest frame with the selected gaze source. The UI reads a
 single latest numeric sample, so it cannot queue camera frames. Trace writing
-happens on the capture thread, independently of the UI refresh rate. Samples
+happens on the inference/recording worker, independently of the UI refresh rate. Samples
 acquired before the first target presentation or outside the script duration
 are not written. CPU time is the Rust **inference/recording thread CPU time**,
 not camera wall time; it excludes the separate capture thread and UniGaze process/GPU work. Use
@@ -133,7 +133,7 @@ The header wall clock identifies the session; durations use monotonic time.
 Minimizing/unfocusing is unlabelled and does not pause the script. On completion or
 cancellation, in-flight samples not delivered before finalization are not stored.
 
-The capture worker uses create-new filenames and syncs the file after the trace
+The recording worker uses create-new filenames and syncs the file after the trace
 writer flushes an explicit end record on orderly stop. The writer checks finite
 values and increasing times, and periodically flushes frames.
 The reader rejects unsupported schemas, extra fields (including pixel payloads),
@@ -175,8 +175,12 @@ window/amber dot renderer as the glance test presents a 46-second sequence:
   scoreboard/lane-above/lane-beside negatives. Shift naturally through this block:
   lean, turn and move a little closer or farther while following the dots.
 - Four independent validation occurrences: two map looks and points just above
-  and beside the map. Both source identity and the rectangular decision are
-  versioned in saved calibration; older half-plane fits must be repeated.
+  and beside the map.
+
+Saved calibration identifies both the source and the rectangular decision.
+Older half-plane fits must be repeated, including when continuing with MediaPipe.
+Repeat full calibration after changing source, camera position, lighting or map
+geometry; a MediaPipe fit cannot be reused with UniGaze.
 
 The map comes from `lucas-geometry` using the League settings and the saved
 alignment profile for the main-monitor resolution, MinimapScale and flip. See the
@@ -189,11 +193,11 @@ placement, labels and saved-model geometry comparisons. Changing that rectangle
 requires full calibration again before Quick check can reuse a model.
 
 Each two-second calibration target is visible through a 500 ms settling phase
-and the following hold; the first 200 ms of the hold are also discarded. This
-provides 700 ms of actual dot visibility before collection, rather than hiding
-the dot during its nominal settle phase. Target labels
-are matched to capture acquisition times, not UI receipt. Losing focus leaves
-frames unlabelled; it does not pause the schedule. Missing target coverage fails
+and the following hold. Collection requires at least 200 ms of hold time and
+700 ms of continuous target visibility, including after focus returns or a
+delayed UI submission. Target labels are matched to capture acquisition times,
+not UI receipt. Losing focus leaves frames unlabelled and resets visibility
+settling; it does not pause the schedule. Missing target coverage fails
 calibration. Escape cancels without replacing previous weights.
 
 Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
@@ -202,11 +206,8 @@ shows mean angular error, sensitivity/FPR and pass/fail. In standalone or tray
 calibration, only passing fits save weights/geometry/validation aggregates through
 `lucas-store` and update the saved camera selection; failures retain the previous
 model. First-run setup instead uses the [draft and Finish contract](src/runtime/README.md#before-play).
-Full calibration samples are discarded by default. Explicitly setting
-`LUCAS_CALIBRATION_DIAGNOSTICS` to a local directory exports numeric samples,
-raw/filtered comparisons, timing, geometry, per-target errors/scores and threshold
-information for each full calibration in that process (including failure/cancel).
-No images or uploads; this does not promote a failing calibration. See the
+Full calibration samples are discarded by default. For the separate opt-in
+export, its contents and privacy controls, see the
 [one-run diagnostic instructions](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).
 The separate glance recorder still requires explicit opt-in for each recording.
 
