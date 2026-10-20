@@ -23,7 +23,7 @@ Copy-Item (Join-Path $root 'models/README.md') (Join-Path $bundle 'models')
 # Explicit allowlist: never copy a developer's installed weights, venv or cache.
 $unigaze = Join-Path $bundle 'models/unigaze'
 New-Item -ItemType Directory -Force $unigaze | Out-Null
-foreach ($name in @('setup.ps1', 'prepare.py', 'worker.py', 'assets.json', 'requirements-windows.lock', 'requirements.in', 'README.md')) {
+foreach ($name in @('setup.ps1', 'check.ps1', 'prepare.py', 'worker.py', 'assets.json', 'requirements-windows.lock', 'requirements.in', 'README.md')) {
     Copy-Item (Join-Path $root "models/unigaze/$name") $unigaze
 }
 # Public Apache-2.0 diagnostic fixture; never a user's camera image.

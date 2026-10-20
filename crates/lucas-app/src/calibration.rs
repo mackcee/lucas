@@ -1,5 +1,6 @@
 //! Calibration schedule, in-memory observations and the M5.2 revalidation seam.
 //! No camera frames or calibration observations are persisted by this module.
+//! Explicit numeric diagnostic export is isolated in calibration_diagnostics.
 use crate::{
     script::{Phase, Step, Target, TargetKind},
     timer::alignment_store::{AlignmentStore, Key},
@@ -15,6 +16,11 @@ use std::time::Duration;
 
 pub const SETTLE: Duration = Duration::from_millis(500);
 pub const TARGET_TIME: Duration = Duration::from_secs(2);
+/// Show the dot throughout settling, not a central countdown instead of it.
+/// Glance-test presentation remains separate and unchanged.
+pub fn visible_target(step: Step, focused: bool) -> Option<Target> {
+    (focused && matches!(step.phase, Phase::Countdown | Phase::Hold)).then_some(step.target)
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Fit,

@@ -188,8 +188,10 @@ alignment file blocks calibration. The corrected rectangle determines target
 placement, labels and saved-model geometry comparisons. Changing that rectangle
 requires full calibration again before Quick check can reuse a model.
 
-Each two-second target has a 500 ms prompt followed by a hold;
-the first 200 ms after a displayed hold are discarded for settling. Target labels
+Each two-second calibration target is visible through a 500 ms settling phase
+and the following hold; the first 200 ms of the hold are also discarded. This
+provides 700 ms of actual dot visibility before collection, rather than hiding
+the dot during its nominal settle phase. Target labels
 are matched to capture acquisition times, not UI receipt. Losing focus leaves
 frames unlabelled; it does not pause the schedule. Missing target coverage fails
 calibration. Escape cancels without replacing previous weights.
@@ -200,7 +202,12 @@ shows mean angular error, sensitivity/FPR and pass/fail. In standalone or tray
 calibration, only passing fits save weights/geometry/validation aggregates through
 `lucas-store` and update the saved camera selection; failures retain the previous
 model. First-run setup instead uses the [draft and Finish contract](src/runtime/README.md#before-play).
-Full calibration samples never create a numeric trace file.
+Full calibration samples are discarded by default. Explicitly setting
+`LUCAS_CALIBRATION_DIAGNOSTICS` to a local directory exports numeric samples,
+raw/filtered comparisons, timing, geometry, per-target errors/scores and threshold
+information for each full calibration in that process (including failure/cancel).
+No images or uploads; this does not promote a failing calibration. See the
+[one-run diagnostic instructions](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).
 The separate glance recorder still requires explicit opt-in for each recording.
 
 **Quick check** uses one minimap and one centre target in four seconds. It neither

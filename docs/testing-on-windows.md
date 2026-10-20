@@ -224,7 +224,7 @@ extracted bundle directory, run:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\setup.ps1
 if ($LASTEXITCODE -ne 0) { throw 'UniGaze setup failed' }
-.\lucas.exe --check-gaze-model | Out-Host
+powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\check.ps1
 if ($LASTEXITCODE -ne 0) { throw 'CUDA check failed; do not start calibration yet' }
 .\lucas.exe --calibrate
 ```
@@ -265,12 +265,15 @@ provider, GPU name, full-pipeline/model-only median and p95 latency, and CUDA
 allocated/reserved/peak memory including startup. Startup is bounded to 120 s,
 and the diagnostic to a further 60 s. Exit 0 means model execution succeeded;
 nonzero prints the specific missing asset/hash/CUDA/child-process error. Use the
-PowerShell `| Out-Host` pipe above so the GUI-subsystem executable finishes before
-reading `$LASTEXITCODE`. `--models <directory>` can select another model root;
+bundled `models\unigaze\check.ps1` helper above: it uses `Start-Process -Wait
+-NoNewWindow -RedirectStandardOutput -RedirectStandardError`, prints both logs,
+and returns the actual process exit code. A GUI-subsystem executable can otherwise
+return early or show no output in interactive PowerShell, even with `| Out-Host`.
+The logs remain under `models\unigaze\checks`. `--models <directory>` can select another model root;
 do not combine this diagnostic with camera or window modes.
 
-This is a runtime/latency check, **not an accuracy result**. Real-webcam UniGaze
-calibration and G2 acceptance are **pending**. No tested configuration has yet
+This is a runtime/latency check, **not an accuracy result**. User webcam trials
+have not yet passed calibration; G2 acceptance remains **pending**. No tested configuration has yet
 met G2 (at least 90% glances detected and at most one false start/minute).
 
 ### Calibrate with natural movement
@@ -281,15 +284,55 @@ minutes; model warmup completes before the camera opens. Enter your actual scree
 dimensions (for the investigated 27-inch display: 597×336 mm, 3840×2160) and your
 viewing distance (about 650 mm in that setup). Do not substitute Windows DPI.
 
-The flow remains about **46 seconds**. Follow the dots comfortably; after the
+The flow remains about **46 seconds**. Each dot is visible during the 500 ms
+settling phase; collection starts after that phase plus a 200 ms guard. Previously
+the dot was hidden during settling, so the first accepted samples could still
+reflect the preceding fixation/filter transition. Follow the dots comfortably; after the
 initial grid, shift naturally when prompted: lean, turn, and move a little closer
 or farther, without looking away from the dots. Both map and elsewhere targets
 occur during movement. Just-outside targets above and beside the map check the
 two in-screen boundaries; flipped maps are mirrored. The personal screen mapping
 uses a **four-sided rectangular minimap score**, not a half-plane. The 100 ms
 dwell and all calibration/G2 pass thresholds are unchanged. Failed validation
-retains the previous profile; improve positioning/lighting and retry rather than
-loosening thresholds. Quick check and glance recording use the same source.
+retains the previous profile. Low mean error and high usable-frame coverage do not
+prove that map/elsewhere samples are separable; do not loosen thresholds to hide
+that failure. Quick check and glance recording use the same source.
+
+### One-run numeric calibration diagnostics (explicit opt-in)
+
+When tracking looks good but sensitivity is low, run one full calibration with
+this opt-in. It saves **gaze/pose numbers, not images**: raw and filtered features,
+acquisition/visibility/settling times, labels, geometry (including DPI/canvas),
+per-target scores/errors, the selected threshold/effective rectangle, and fitted
+weights. Failed/cancelled full calibrations are included. Nothing is uploaded.
+Files can reveal where you looked; share only the file you choose, then delete it
+when no longer needed. Normal calibration does **not** export these samples.
+
+From the test bundle, close other LUCAS instances first:
+
+```powershell
+$oldDiagnostics = $env:LUCAS_CALIBRATION_DIAGNOSTICS
+$oldSource = $env:LUCAS_GAZE_SOURCE
+try {
+    $env:LUCAS_CALIBRATION_DIAGNOSTICS = Join-Path $PWD 'calibration-diagnostics'
+    $env:LUCAS_GAZE_SOURCE = 'unigaze'
+    Start-Process -FilePath (Join-Path $PWD 'lucas.exe') -ArgumentList '--calibrate' -Wait
+    # After one full calibration, note the result and close the debug window.
+} finally {
+    $env:LUCAS_CALIBRATION_DIAGNOSTICS = $oldDiagnostics
+    $env:LUCAS_GAZE_SOURCE = $oldSource
+}
+Get-ChildItem .\calibration-diagnostics\calibration-*.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1 FullName
+```
+
+Enter the true physical screen size (e.g. 597×336 mm), keep the assumed distance
+consistent, and check the selected camera and map alignment. Physical size changes
+the reported angular error but **not** the current normalized rectangular score
+for identical samples. A different sensitivity on a fresh run needs the numeric
+evidence; it cannot be attributed to mm alone. A threshold above 0.5 erodes all
+four edges; with fewer than 1,000 negative frames, the unchanged 0.1% FPR budget
+allows zero calibration false positives. Early transition samples can therefore
+raise that threshold substantially. Exports expose this rather than hiding it.
 
 The requested format is 1280×720 MJPEG at 30 fps. The debug view shows **Face
 found**, whether the eyes are usable, raw eye/head features, observed fps, Rust

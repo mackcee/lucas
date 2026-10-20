@@ -5,7 +5,7 @@ $InstallDirectory = [IO.Path]::GetFullPath($InstallDirectory)
 New-Item -ItemType Directory -Force $InstallDirectory | Out-Null
 # Marker is committed only after every download/dependency succeeded.
 Remove-Item (Join-Path $InstallDirectory 'READY') -ErrorAction SilentlyContinue
-foreach ($name in @('worker.py', 'prepare.py', 'assets.json', 'requirements-windows.lock')) {
+foreach ($name in @('worker.py', 'prepare.py', 'check.ps1', 'assets.json', 'requirements-windows.lock')) {
     $src = Join-Path $PSScriptRoot $name
     $dst = Join-Path $InstallDirectory $name
     if ([IO.Path]::GetFullPath($src) -ne [IO.Path]::GetFullPath($dst)) { Copy-Item $src $dst -Force }
@@ -40,5 +40,5 @@ try {
     $env:UV_PYTHON_INSTALL_DIR = $oldPython
 }
 Write-Host "UniGaze installed in $InstallDirectory. No camera has been opened."
-Write-Host 'Next: .\lucas.exe --check-gaze-model | Out-Host'
+Write-Host 'Next: powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\check.ps1'
 Write-Host 'Then: .\lucas.exe --calibrate (old MediaPipe calibrations cannot be reused).'

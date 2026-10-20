@@ -2,6 +2,7 @@ use crate::capture::{Diagnostic, Presentation, Worker};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, RichText, Stroke, Vec2, ViewportCommand};
 use lucas_app::{
     calibration::{self, CalibrationScript},
+    calibration_diagnostics,
     script::{Phase, Script, Step, validate_duration},
     settings::MinimapSelection,
     timer::alignment_store::{self, AlignmentStore},
@@ -151,6 +152,8 @@ struct Test {
     started: Instant,
     script: Schedule,
     screen: lucas_store::ScreenGeometry,
+    diagnostic_directory: Option<PathBuf>,
+    paint_bounds_px: Option<[f64; 4]>,
 }
 struct Pending {
     started: Instant,
@@ -238,16 +241,50 @@ impl DebugApp {
         }
     }
     fn finish_test(&mut self, context: &egui::Context, reason: EndReason) {
-        let observations = if let Some(worker) = &self.worker {
+        let (observations, diagnostic_frames) = if let Some(worker) = &self.worker {
             let mut state = worker.shared.lock().unwrap();
             state.finish(reason);
-            state.take_calibration()
+            let frames = state.take_calibration_diagnostics();
+            (state.take_calibration(), frames)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
         if let Some(test) = self.test.take() {
+            let mut diagnostic_note = String::new();
+            let mut export = |script: &CalibrationScript,
+                              model: Option<&lucas_gaze::calibration::CalibrationModel>,
+                              error: Option<&str>| {
+                diagnostic_note = match calibration_diagnostics::export(
+                    test.diagnostic_directory.as_deref(),
+                    script,
+                    &observations,
+                    &diagnostic_frames,
+                    model,
+                    error,
+                    Some(&calibration_diagnostics::Display {
+                        monitor: test.screen.clone(),
+                        paint_bounds_px: test.paint_bounds_px,
+                    }),
+                ) {
+                    Ok(Some(path)) => format!(
+                        "\nNumeric calibration diagnostics saved: {}. No images; share only if you choose.",
+                        path.display()
+                    ),
+                    Ok(None) => String::new(),
+                    Err(e) => format!(
+                        "\nNumeric diagnostics could not be saved: {e}. Check the export folder; calibration result is unchanged."
+                    ),
+                };
+            };
             let result: lucas_app::trace::Result<Option<String>> = (|| {
                 if reason != EndReason::Completed {
+                    if let Schedule::Calibration(script) = &test.script {
+                        export(
+                            script,
+                            None,
+                            Some("calibration cancelled or tracking stopped"),
+                        );
+                    }
                     return Ok((!matches!(test.script, Schedule::Glance(_))).then(|| {
                         "Calibration cancelled. Your previous calibration is unchanged.".into()
                     }));
@@ -255,7 +292,10 @@ impl DebugApp {
                 let (model, validation, save) = match &test.script {
                     Schedule::Glance(_) => return Ok(None),
                     Schedule::Calibration(script) => {
-                        let model = calibration::fit_session(script, &observations)?;
+                        let fitted = calibration::fit_session(script, &observations);
+                        let error = fitted.as_ref().err().map(|e| e.to_string());
+                        export(script, fitted.as_ref().ok(), error.as_deref());
+                        let model = fitted?;
                         let validation = model.validation();
                         (model, validation, true)
                     }
@@ -269,7 +309,7 @@ impl DebugApp {
                 if pass && save {
                     let profile = calibration::profile(
                         &model,
-                        test.screen,
+                        test.screen.clone(),
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)?
                             .as_millis()
@@ -303,12 +343,14 @@ impl DebugApp {
                     validation.true_positive_rate * 100.0,
                     validation.false_positive_rate * 100.0,
                     validation.usable_fraction * 100.0,
-                    if pass && save {
+                    if pass && save && test.diagnostic_directory.is_some() {
+                        "Calibration saved locally. Numeric diagnostic export requested; no images."
+                    } else if pass && save {
                         "Calibration saved locally. No images or training samples saved."
                     } else if pass {
                         "Ready for this geometry. Saved weights unchanged."
                     } else {
-                        "Not saved. Add a front light, sit comfortably, then calibrate again."
+                        "Calibration not saved. Check target visibility, screen/minimap alignment and tracking quality. Numeric diagnostics can help distinguish decision overlap from tracking loss."
                     }
                 )))
             })();
@@ -320,6 +362,9 @@ impl DebugApp {
                         "Calibration not saved: {e}. Your previous calibration is unchanged."
                     ))
                 }
+            }
+            if let Some(text) = &mut self.calibration_result {
+                text.push_str(&diagnostic_note);
             }
         }
         if self.runtime_kind == Some(RunKind::Quick) {
@@ -432,11 +477,20 @@ impl DebugApp {
                 } else {
                     Schedule::Calibration(script)
                 };
-                state.begin_calibration(started, schedule.duration());
+                let diagnostic_directory = (self.requested == RunKind::Calibrate)
+                    .then(calibration_diagnostics::directory_from_env)
+                    .flatten();
+                state.begin_calibration(
+                    started,
+                    schedule.duration(),
+                    diagnostic_directory.is_some(),
+                );
                 return Ok(Test {
                     started,
                     script: schedule,
                     screen,
+                    diagnostic_directory,
+                    paint_bounds_px: None,
                 });
             }
             let script = Script::new(self.seconds, self.monitor.resolution, minimap.settings())
@@ -468,6 +522,8 @@ impl DebugApp {
                 started,
                 script: Schedule::Glance(script),
                 screen,
+                diagnostic_directory: None,
+                paint_bounds_px: None,
             })
         })();
         match result {
@@ -517,7 +573,11 @@ impl DebugApp {
         } else {
             Phase::Unfocused
         };
-        let target = (phase == Phase::Hold).then_some(step.target);
+        let target = if is_calibration {
+            calibration::visible_target(step, focused)
+        } else {
+            (phase == Phase::Hold).then_some(step.target)
+        };
         let shown = Presentation { phase, target };
         self.worker
             .as_ref()
@@ -526,12 +586,18 @@ impl DebugApp {
             .lock()
             .unwrap()
             .present(Instant::now(), shown);
+        let mut paint_bounds_px = None;
         // Fixed background brightness across countdown and target holds. No camera
         // preview, animated status meter or gaze marker competes with the target.
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::from_gray(74)))
             .show(root, |ui| {
                 let rect = ui.max_rect();
+                let scale = f64::from(context.pixels_per_point());
+                paint_bounds_px = Some(
+                    [rect.left(), rect.top(), rect.right(), rect.bottom()]
+                        .map(|x| f64::from(x) * scale),
+                );
                 let painter = ui.painter();
                 if let Some(target) = target {
                     paint_target(painter, rect, target.position);
@@ -612,6 +678,9 @@ impl DebugApp {
                     Color32::from_gray(220),
                 );
             });
+        if let Some(test) = &mut self.test {
+            test.paint_bounds_px = paint_bounds_px;
+        }
         context.set_cursor_icon(egui::CursorIcon::None);
     }
     fn show_debug(&mut self, root: &mut egui::Ui) {
@@ -636,6 +705,9 @@ impl DebugApp {
                 }
                 ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Quick check before play", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
                 ui.label(if self.runtime_kind.is_some() { "Connect your calibrated camera, then start below. Coaching stays paused until validation passes. Close this window to cancel." } else { "Check camera placement and lighting before recording your glance test." });
+                if let Some(folder) = calibration_diagnostics::directory_from_env() {
+                    ui.label(format!("Calibration diagnostics enabled: each full calibration in this session saves gaze/pose numbers to {}. No images or automatic uploads.", folder.display()));
+                }
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(!running && self.pending.is_none() && self.setup_camera.is_none(), |ui| {

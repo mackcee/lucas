@@ -2,7 +2,7 @@
 
 This optional install adds the official **UniGaze-H/14 joint** model (632M
 parameters) with the **SFD + 2D-FAN** GPU face frontend. It does not establish G2
-accuracy. Real-webcam calibration and G2 acceptance are **pending**.
+accuracy. User webcam trials have not passed calibration; G2 acceptance is **pending**.
 
 ## One-time Windows install
 
@@ -12,10 +12,14 @@ free disk space (downloads, Python/CUDA wheels, caches and weights):
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\setup.ps1
 if ($LASTEXITCODE -ne 0) { throw 'UniGaze setup failed' }
-.\lucas.exe --check-gaze-model | Out-Host
+powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\check.ps1
 if ($LASTEXITCODE -ne 0) { throw 'CUDA model diagnostic failed' }
 .\lucas.exe --calibrate
 ```
+
+`check.ps1` explicitly waits for the GUI-subsystem executable, captures stdout
+and stderr, prints both, and returns its exit code. This avoids interactive
+PowerShell's blank/early-return behavior; logs stay under `checks/`.
 
 Review the downloaded build/scripts before running them. The execution-policy
 exception applies only to this PowerShell process. No administrator rights,
@@ -126,7 +130,10 @@ The three public/synthetic FP16-vs-FP32 camera-ray deviations were below 0.023°
 RGB/BGR warp parity was exact. Actual CUDA pipe tests preserved timestamps and
 returned unknown for a blank frame. Missing CUDA, corrupt assets and a missing
 install each failed explicitly with exit 1. **Real-webcam calibration and G2
-acceptance remain pending.**
+acceptance remain pending.** For low-sensitivity trials, use the explicit
+[numeric calibration export](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in)
+to distinguish settling, mapping/geometry and threshold failures; aggregate error
+alone cannot establish the cause.
 
 For GPU development verification, run the installed Python on `validate.py
 --root <install-directory>` from this source checkout. It compares FP16 against

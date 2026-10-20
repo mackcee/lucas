@@ -214,15 +214,34 @@ impl CalibrationModel {
         let x = self.vector(f);
         self.ridge.map(|w| SVector::from(w).dot(&x))
     }
-    /// None = unknown (tracking loss, blink, low quality, off-screen estimate).
-    /// All four edges of the actual minimap bound positive scores. Error-inflated
-    /// geometry remains diagnostic only, never an independent positive check.
-    pub fn predict(&self, sample: GazeSample) -> Option<Prediction> {
+    /// Numeric diagnostics may inspect off-monitor estimates without promoting
+    /// them to known gaze. Prediction/validation still reject those estimates.
+    pub fn screen_estimate(&self, sample: GazeSample) -> Option<[f64; 2]> {
         let f = usable(sample)?;
         if f.kind() != self.kind {
             return None;
         }
         let point = self.point(f);
+        point.iter().all(|x| x.is_finite()).then_some(point)
+    }
+    pub fn residual_scales(&self) -> [f64; 2] {
+        self.residual
+    }
+    /// The effective entry rectangle after the selected probability threshold.
+    /// A high score threshold erodes all four edges; None denotes an empty zone.
+    pub fn decision_rectangle(&self) -> Option<[f64; 4]> {
+        let logit = (self.threshold / (1.0 - self.threshold)).ln();
+        let [dx, dy] = self.residual.map(|s| s * logit);
+        let [l, t, r, b] = self.screen.minimap;
+        let result = [l + dx, t + dy, r - dx, b - dy];
+        (result.iter().all(|x| x.is_finite()) && result[0] < result[2] && result[1] < result[3])
+            .then_some(result)
+    }
+    /// None = unknown (tracking loss, blink, low quality, off-screen estimate).
+    /// All four edges of the actual minimap bound positive scores. Error-inflated
+    /// geometry remains diagnostic only, never an independent positive check.
+    pub fn predict(&self, sample: GazeSample) -> Option<Prediction> {
+        let point = self.screen_estimate(sample)?;
         if point
             .iter()
             .any(|x| !x.is_finite() || !(0.0..=1.0).contains(x))

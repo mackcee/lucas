@@ -3,6 +3,7 @@
 /.venv/
 /python/
 /cache/
+/checks/
 /bootstrap/
 /source.zip
 /unigaze_h14_joint.safetensors
