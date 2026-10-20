@@ -341,12 +341,29 @@ Before the recording, close the debug window and other camera apps. In PowerShel
 in the extracted bundle directory, run this standalone option without other flags:
 
 ```powershell
-.\lucas.exe --check-camera | Out-Host
-$LASTEXITCODE
+$logDirectory = Join-Path $PWD ('camera-check-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $logDirectory | Out-Null
+$stdout = Join-Path $logDirectory 'stdout.txt'
+$stderr = Join-Path $logDirectory 'stderr.txt'
+$check = Start-Process -FilePath (Join-Path $PWD 'lucas.exe') -ArgumentList '--check-camera' `
+    -Wait -NoNewWindow -PassThru -ErrorAction Stop `
+    -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+Get-Content $stdout
+Get-Content $stderr
+"Exit code: $($check.ExitCode)"
+"Diagnostic logs: $logDirectory"
 ```
 
-The pipe waits for this Windows GUI-subsystem executable to finish. This opens
-camera **index 0** through the same `NokhwaCamera::open_c270` / `Camera::capture`
+This explicitly waits for the Windows GUI-subsystem executable and captures both
+output streams. Use **`$check.ExitCode`**, not `$LASTEXITCODE`, for this invocation.
+The logs remain in the printed directory; no images are saved. For the no-camera
+`--check-runtime`, `--version` or `--help` diagnostics, use this same pattern with
+only the `-ArgumentList` value changed. For `--check-gaze-model`, use the bundled
+[`check.ps1` helper](#headless-gpu-model-check-no-camera) instead. Direct invocation
+or `| Out-Host` can return early or display no output in interactive PowerShell.
+
+The `--check-camera` option opens camera **index 0** through the same
+`NokhwaCamera::open_c270` / `Camera::capture`
 path as the app, including acquisition timestamp validation. If several webcams
 are attached, disconnect the others so the C270 is index 0. No window, model
 inference, recording, or pixel output is involved; frames are cleared in RAM.
@@ -418,7 +435,8 @@ physical monitor measurements, saved alignment and when to recalibrate.
 ### Troubleshooting / development
 
 - Missing UniGaze model/hash/dependency: quit LUCAS and rerun its `setup.ps1`, then
-  `--check-gaze-model`. CUDA unavailable: check the NVIDIA driver and the private
+  run the bundled `check.ps1` as shown in [setup](#one-time-unigaze-setup-nvidia-cuda).
+  CUDA unavailable: check the NVIDIA driver and the private
   CUDA 12.8 install; no CPU fallback is used. A child crash/timeout stops tracking
   and reports an error. Reconnect only after the diagnostic succeeds.
 - Missing MediaPipe model/hash: re-extract the complete matching bundle. The app
@@ -438,7 +456,9 @@ physical monitor measurements, saved alignment and when to recalibrate.
 - From a source checkout: `cargo run -p lucas-app -- --models models`.
   `lucas.exe --seconds 60` opens the same setup; consent is still
   required. `lucas.exe --check-runtime` checks packaged models/runtime without
-  opening the camera. `--version` and `--help` do not open a window.
+  opening the camera. `--version` and `--help` do not open a window. Run these
+  CLI-only options with the [waited, file-captured pattern](#headless-camera-check-about-3-seconds)
+  above, replacing `-ArgumentList` with the desired option.
 - Offline, on Windows or Linux: `cargo xtask replay path/to/trace.jsonl` prints
   frames, valid-frame share, observed fps and per-target-kind feature distributions.
   See [the trace format](https://github.com/mackcee/lucas/blob/main/crates/lucas-app/README.md)
