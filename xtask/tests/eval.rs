@@ -39,6 +39,7 @@ fn fixture(path: &Path, bad: bool) {
         ]);
         writer
             .frame(FrameRecord {
+                feature_kind: Default::default(),
                 timestamp_ns: ns,
                 source_timestamp_ns: ns,
                 features,

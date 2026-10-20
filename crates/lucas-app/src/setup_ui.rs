@@ -158,6 +158,13 @@ impl Controls {
                 self.worker = None;
             }
         });
+        if let Some(source) = self
+            .worker
+            .as_ref()
+            .and_then(|w| w.shared.lock().ok()?.source.clone())
+        {
+            ui.label(source);
+        }
         let diagnostic = self
             .worker
             .as_ref()
@@ -225,7 +232,7 @@ impl Controls {
                 }
             }
             SetupStep::Calibration => {
-                ui.label("Follow the dots in the existing calibration screen (about 46 seconds). Use your normal playing position and glasses. A validation check must pass before continuing.");
+                ui.label("Follow the dots for about 46 seconds, shifting naturally when prompted (lean, turn, move closer or farther). Use your normal glasses and lighting. A validation check must pass before continuing.");
                 if self.setup.as_ref().unwrap().calibration_passed() {
                     ui.strong("Calibration passed for your selected camera.");
                 }

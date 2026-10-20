@@ -2265,6 +2265,8 @@ dependencies = [
  "nokhwa",
  "nokhwa-bindings-windows",
  "ort",
+ "serde",
+ "serde_json",
  "sha2",
  "thread-priority",
  "windows",

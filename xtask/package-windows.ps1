@@ -10,7 +10,8 @@ New-Item -ItemType Directory -Force $bundle | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $bundle 'models') | Out-Null
 Copy-Item (Join-Path $release 'lucas.exe') $bundle
 # ort rc.14 links ONNX Runtime statically but its Windows archive also requires
-# DirectML.dll. CPU is the only provider selected by LUCAS. Copy all runtime DLLs
+# DirectML.dll. MediaPipe selects CPU; UniGaze uses its separately installed CUDA child.
+# Copy all runtime DLLs
 # emitted by ort's copy-dylibs, including onnxruntime.dll if that layout changes.
 $dlls = @(Get-ChildItem (Join-Path $release '*.dll') -File)
 if ($dlls.Count -eq 0) { throw 'No native runtime DLLs found beside lucas.exe' }
@@ -19,6 +20,14 @@ Copy-Item (Join-Path $root 'models/face_detector.onnx') (Join-Path $bundle 'mode
 Copy-Item (Join-Path $root 'models/face_landmarks_detector.onnx') (Join-Path $bundle 'models')
 Copy-Item (Join-Path $root 'models/SHA256SUMS') (Join-Path $bundle 'models')
 Copy-Item (Join-Path $root 'models/README.md') (Join-Path $bundle 'models')
+# Explicit allowlist: never copy a developer's installed weights, venv or cache.
+$unigaze = Join-Path $bundle 'models/unigaze'
+New-Item -ItemType Directory -Force $unigaze | Out-Null
+foreach ($name in @('setup.ps1', 'prepare.py', 'worker.py', 'assets.json', 'requirements-windows.lock', 'requirements.in', 'README.md')) {
+    Copy-Item (Join-Path $root "models/unigaze/$name") $unigaze
+}
+# Public Apache-2.0 diagnostic fixture; never a user's camera image.
+Copy-Item (Join-Path $root 'crates/lucas-gaze/tests/fixtures/portrait.jpg') $unigaze
 foreach ($name in @('LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE')) {
     Copy-Item (Join-Path $root $name) $bundle
 }

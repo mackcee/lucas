@@ -1,12 +1,15 @@
-//! Dedicated below-normal-priority capture/inference thread. Shared state carries
-//! only numbers; the gaze crate clears RGB buffers immediately after inference.
+//! Inference/recording worker fed by a below-normal-priority latest-frame camera
+//! thread. Shared UI state carries only numbers; RGB stays in the gaze pipeline.
 use lucas_app::{
     script::{Phase, Target},
     trace::{self, EndReason, FrameRecord, Header, TraceWriter},
 };
 use lucas_gaze::{
-    FaceLandmarks, Frame, GazeSample, GazeSource, Landmarker, MediaPipeLandmarker,
-    WebcamGazeSource, camera::NokhwaCamera, features, models::VerifiedModels, runtime::OrtBackend,
+    GazeSample, GazeSource,
+    camera::NokhwaCamera,
+    features::FeatureKind,
+    latest::LatestCamera,
+    tracker::{ModelGazeSource, Selection, Tracker},
 };
 use std::{
     fs::{File, OpenOptions},
@@ -23,6 +26,7 @@ use std::{
 #[derive(Clone, Copy)]
 pub struct Diagnostic {
     pub sample: GazeSample,
+    pub feature_kind: FeatureKind,
     pub raw: Option<[f32; 10]>,
     pub face_found: bool,
     pub cpu_ms: f64,
@@ -54,6 +58,7 @@ pub struct Shared {
     pub latest: Option<Diagnostic>,
     pub error: Option<String>,
     pub saved: Option<PathBuf>,
+    pub source: Option<String>,
     recording: Option<Recording>,
     recording_path: Option<PathBuf>,
     collection: Option<Collection>,
@@ -176,6 +181,7 @@ impl Shared {
         recording.writer.frame(FrameRecord {
             timestamp_ns: elapsed.as_nanos().try_into()?,
             source_timestamp_ns: diagnostic.sample.timestamp.as_nanos().try_into()?,
+            feature_kind: diagnostic.feature_kind,
             features: diagnostic.sample.features.map(|f| f.as_array()),
             raw_features: diagnostic.raw,
             face_found: diagnostic.face_found,
@@ -202,7 +208,7 @@ impl Worker {
                 let mut state = state.lock().unwrap();
                 state.finish(EndReason::TrackingError);
                 state.error = Some(format!(
-                    "Camera/tracking stopped: {error}. Close other camera apps, check lighting and reconnect."
+                    "Tracking stopped: {error}. Stop the camera before retrying. For UniGaze, run --check-gaze-model; for camera errors, check permissions and other camera apps."
                 ));
             }
             state.lock().unwrap().finish(EndReason::Cancelled);
@@ -231,45 +237,6 @@ impl Drop for Worker {
     }
 }
 
-#[derive(Default)]
-struct Raw {
-    found: bool,
-    features: Option<[f32; 10]>,
-    luminance: f32,
-}
-struct ObservedLandmarker<L> {
-    inner: L,
-    raw: Arc<Mutex<Raw>>,
-}
-impl<L: Landmarker> Landmarker for ObservedLandmarker<L> {
-    fn locate(&mut self, frame: &Frame) -> lucas_gaze::Result<Option<FaceLandmarks>> {
-        let face = self.inner.locate(frame)?;
-        let mut count = 0;
-        let sum: f32 = frame
-            .rgb()
-            .chunks_exact(3)
-            .step_by(64)
-            .map(|p| {
-                count += 1;
-                (0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2]))
-                    / 255.0
-            })
-            .sum();
-        *self.raw.lock().unwrap() = Raw {
-            found: face.is_some(),
-            luminance: if count == 0 { 0.0 } else { sum / count as f32 },
-            features: face
-                .as_ref()
-                .and_then(features::extract)
-                .map(|(f, _)| f.as_array()),
-        };
-        Ok(face)
-    }
-    fn reset(&mut self) {
-        self.inner.reset();
-        *self.raw.lock().unwrap() = Raw::default();
-    }
-}
 fn run(
     index: u32,
     models: PathBuf,
@@ -277,15 +244,21 @@ fn run(
     stop: &AtomicBool,
     context: &eframe::egui::Context,
 ) -> trace::Result<()> {
-    let camera = NokhwaCamera::open_c270(index)?;
+    state.lock().unwrap().source =
+        Some("Loading gaze source… UniGaze startup can take up to two minutes.".into());
+    let tracker = Tracker::load_cancellable(&models, Selection::from_env()?, Some(stop))?;
+    state.lock().unwrap().source = Some(tracker.description().into());
+    if stop.load(Ordering::Relaxed) {
+        return Ok(());
+    }
+    let camera = LatestCamera::start(move || {
+        let camera = NokhwaCamera::open_c270(index)?;
+        let origin = camera.timestamp_origin();
+        Ok((camera, origin))
+    })?;
     // Camera acquisition and displayed targets share Instant's monotonic clock.
     let camera_origin = camera.timestamp_origin();
-    let raw = Arc::new(Mutex::new(Raw::default()));
-    let landmarker = ObservedLandmarker {
-        inner: MediaPipeLandmarker::new(OrtBackend::new(VerifiedModels::load(&models)?)?),
-        raw: raw.clone(),
-    };
-    let mut source = WebcamGazeSource::new(camera, landmarker)?;
+    let mut source = ModelGazeSource::new(camera, tracker)?;
     let mut recent = std::collections::VecDeque::new();
     while !stop.load(Ordering::Relaxed) {
         let cpu = cpu_time::ThreadTime::now();
@@ -313,11 +286,12 @@ fn run(
         } else {
             (recent.len() - 1) as f64 / span.as_secs_f64()
         };
-        let raw = raw.lock().unwrap();
+        let raw = source.diagnostic();
         let diagnostic = Diagnostic {
             sample,
-            raw: raw.features,
-            face_found: raw.found,
+            feature_kind: source.kind(),
+            raw: raw.raw,
+            face_found: raw.face_found,
             cpu_ms,
             fps,
             received,
@@ -365,6 +339,7 @@ mod tests {
                 features: None,
                 quality: 0.0,
             },
+            feature_kind: FeatureKind::MediaPipe,
             raw: None,
             face_found: false,
             cpu_ms: 1.0,

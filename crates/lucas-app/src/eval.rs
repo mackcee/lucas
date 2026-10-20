@@ -129,6 +129,11 @@ pub fn evaluate(
     distance_mm: f64,
 ) -> Result<EvaluationRun> {
     let calibration = separate.unwrap_or(trace);
+    if calibration.frames.first().map(|f| f.feature_kind)
+        != trace.frames.first().map(|f| f.feature_kind)
+    {
+        return Err("calibration and evaluation gaze sources differ".into());
+    }
     if separate.is_some()
         && (calibration.header.monitor_resolution != trace.header.monitor_resolution
             || calibration.header.minimap.settings() != trace.header.minimap.settings())

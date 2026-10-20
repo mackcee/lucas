@@ -194,7 +194,8 @@ checking them.
 
 This session uses the gaze debug window and opt-in glance recorder, not timer
 mode or gaze-driven coaching. Use Windows 10/11 x64 and an AVX2-capable CPU.
-No Rust, Python, model downloads or developer tools are needed on the test PC.
+The MediaPipe fallback needs no developer tools. The stronger UniGaze tracker
+requires the one-time CUDA setup below; it installs its own private Python runtime.
 
 ### Download and run
 
@@ -214,11 +215,88 @@ No Rust, Python, model downloads or developer tools are needed on the test PC.
    other apps using the camera if it cannot open. Allow desktop camera access in
    Windows Settings → Privacy (or Privacy & security) → Camera.
 
+### One-time UniGaze setup (NVIDIA CUDA)
+
+Use a current NVIDIA driver (RTX 5090/Blackwell requires the included CUDA 12.8
+stack). Leave League and other camera apps closed. In PowerShell, from the
+extracted bundle directory, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\setup.ps1
+if ($LASTEXITCODE -ne 0) { throw 'UniGaze setup failed' }
+.\lucas.exe --check-gaze-model | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'CUDA check failed; do not start calibration yet' }
+.\lucas.exe --calibrate
+```
+
+Setup downloads hash-verified official source/weights and pinned Python/CUDA
+dependencies into `models\unigaze` beside the app. Allow about 12 GB of free disk
+space. No administrator rights, system Python or CUDA SDK are needed. Setup and
+the model check never open the camera. Do not move the installed bundle or run
+setup while LUCAS is open; rerun setup after moving it. Details, hashes, licenses
+and developer reproduction steps: [UniGaze install](../models/unigaze/README.md).
+
+UniGaze is selected automatically when installed; its source/device appears in
+the tracking panel and tray status. If not installed, the app explicitly labels
+MediaPipe fallback. An installed but unavailable CUDA/model stack reports the
+failure: it does not silently run UniGaze on the CPU. To explicitly select the
+original tracker for a new calibration, quit all LUCAS processes, then run:
+
+```powershell
+$env:LUCAS_GAZE_SOURCE = 'mediapipe'
+.\lucas.exe --calibrate
+# For subsequent tray play in the same PowerShell session:
+.\lucas.exe
+# Restore automatic selection before a new UniGaze calibration:
+Remove-Item Env:LUCAS_GAZE_SOURCE -ErrorAction SilentlyContinue
+```
+
+`LUCAS_GAZE_SOURCE=unigaze` instead requires UniGaze and errors if missing. Keep
+the same selection for calibration, quick check, recording and play. Saved
+MediaPipe/old half-plane calibrations cannot be reused with UniGaze; repeat the
+full calibration after changing source, camera position, lighting or map geometry.
+
+### Headless GPU model check (no camera)
+
+`lucas.exe --check-gaze-model` loads the pinned models on **cuda:0**, warms the
+whole SFD/FAN + UniGaze-H FP16 path on a bundled public face image, then performs
+20 timed inferences (3 measured-path warmups excluded). It prints the execution
+provider, GPU name, full-pipeline/model-only median and p95 latency, and CUDA
+allocated/reserved/peak memory including startup. Startup is bounded to 120 s,
+and the diagnostic to a further 60 s. Exit 0 means model execution succeeded;
+nonzero prints the specific missing asset/hash/CUDA/child-process error. Use the
+PowerShell `| Out-Host` pipe above so the GUI-subsystem executable finishes before
+reading `$LASTEXITCODE`. `--models <directory>` can select another model root;
+do not combine this diagnostic with camera or window modes.
+
+This is a runtime/latency check, **not an accuracy result**. Real-webcam UniGaze
+calibration and G2 acceptance are **pending**. No tested configuration has yet
+met G2 (at least 90% glances detected and at most one false start/minute).
+
+### Calibrate with natural movement
+
+Adjust front lighting and camera placement, connect the camera, and wait for the
+source/device and live tracking indicators. First startup can take up to two
+minutes; model warmup completes before the camera opens. Enter your actual screen
+dimensions (for the investigated 27-inch display: 597×336 mm, 3840×2160) and your
+viewing distance (about 650 mm in that setup). Do not substitute Windows DPI.
+
+The flow remains about **46 seconds**. Follow the dots comfortably; after the
+initial grid, shift naturally when prompted: lean, turn, and move a little closer
+or farther, without looking away from the dots. Both map and elsewhere targets
+occur during movement. Just-outside targets above and beside the map check the
+two in-screen boundaries; flipped maps are mirrored. The personal screen mapping
+uses a **four-sided rectangular minimap score**, not a half-plane. The 100 ms
+dwell and all calibration/G2 pass thresholds are unchanged. Failed validation
+retains the previous profile; improve positioning/lighting and retry rather than
+loosening thresholds. Quick check and glance recording use the same source.
+
 The requested format is 1280×720 MJPEG at 30 fps. The debug view shows **Face
-found**, whether the eyes are usable, raw eye/head features, observed fps, capture /
-inference thread CPU time per frame, and heuristic tracking quality. The marker
-uses camera-space iris ratios: it is **not calibrated**, not a screen position,
-and not a minimap detection. No camera preview is shown or stored. Low quality,
+found**, whether the eyes are usable, raw eye/head features, observed fps, Rust
+inference-thread CPU time per frame, and heuristic tracking quality. In v2 traces the CPU figure covers the Rust
+inference thread only, not the capture thread or UniGaze child/GPU. The marker
+uses camera-space angles for UniGaze or iris ratios for MediaPipe: it is **not
+calibrated**, not a screen position, and not a minimap detection. No camera preview is shown or stored. Low quality,
 unknown eyes, or low fps are reasons to adjust lighting and placement first.
 
 ### Headless camera check (about 3 seconds)
@@ -269,8 +347,8 @@ builds alone do not confirm C270 driver behavior.
   of 6, from 60 to 600 seconds. A short test is not the full evaluation session.
 - Check **I agree to save a numeric trace for this test**, then **Start fullscreen
   glance test**. Look at the countdown; when the dot appears, look at its centre
-  and keep looking there until it disappears. Keep your head comfortable and
-  mostly still. **Esc** ends early and saves a trace marked cancelled.
+  and keep looking there until it disappears. Move naturally within your calibrated
+  range of positions; do not deliberately freeze your head. **Esc** ends early and saves a trace marked cancelled.
 - The minimap target uses `lucas-geometry` at the actual main-monitor resolution.
   Before each test, LUCAS reads `MinimapScale` and `FlipMiniMap` from the discovered
   League installation's `Config/PersistedSettings.json`. For a custom installation,
@@ -303,8 +381,12 @@ physical monitor measurements, saved alignment and when to recalibrate.
 
 ### Troubleshooting / development
 
-- Missing model or hash error: re-extract the complete matching bundle. The app
-  never downloads replacement models. Do not change `SHA256SUMS` to bypass it.
+- Missing UniGaze model/hash/dependency: quit LUCAS and rerun its `setup.ps1`, then
+  `--check-gaze-model`. CUDA unavailable: check the NVIDIA driver and the private
+  CUDA 12.8 install; no CPU fallback is used. A child crash/timeout stops tracking
+  and reports an error. Reconnect only after the diagnostic succeeds.
+- Missing MediaPipe model/hash: re-extract the complete matching bundle. The app
+  never downloads replacements at runtime. Do not change model hashes to bypass checks.
 - Camera stopped / trace save error: check camera permissions, close other camera
   apps, and check disk space. Reconnect and start a new recording. A crash or
   forced shutdown can leave an incomplete trace; replay reports that explicitly.

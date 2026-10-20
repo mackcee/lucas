@@ -5,7 +5,7 @@ use lucas_app::{
     script::{Phase, Script, Step, validate_duration},
     settings::MinimapSelection,
     timer::alignment_store::{self, AlignmentStore},
-    trace::{CameraInfo, EndReason, FEATURE_NAMES, Header},
+    trace::{CameraInfo, EndReason, Header, feature_names},
 };
 use std::{
     path::PathBuf,
@@ -139,9 +139,9 @@ impl Schedule {
             Self::Glance(_) => "Look at the next dot",
             Self::Calibration(s) | Self::Quick(s, _) => {
                 if s.at(elapsed).is_some_and(|(_, t)| t.turned) {
-                    "Turn your head slightly; keep your eyes on the dot"
+                    "Shift naturally: lean, turn, move closer or farther; follow the dot"
                 } else {
-                    "Face forward comfortably; follow the dot with your eyes"
+                    "Sit comfortably; follow the dot. We will ask you to shift partway through"
                 }
             }
         }
@@ -442,7 +442,7 @@ impl DebugApp {
             let script = Script::new(self.seconds, self.monitor.resolution, minimap.settings())
                 .map_err(str::to_owned)?;
             let header = Header {
-                schema_version: 1,
+                schema_version: 2,
                 app_version: env!("CARGO_PKG_VERSION").into(),
                 started_unix_ms: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -653,6 +653,11 @@ impl DebugApp {
                     if ui.add_enabled(running, egui::Button::new("Stop camera")).clicked() { self.worker.as_ref().unwrap().stop(); }
                     ui.label("1280 × 720 · MJPEG · 30 fps requested");
                 });
+                if let Some(source) = self.worker.as_ref().and_then(|w| w.shared.lock().unwrap().source.clone()) {
+                    ui.label(source);
+                } else {
+                    ui.label("Gaze source: UniGaze when installed; otherwise MediaPipe. Set LUCAS_GAZE_SOURCE=mediapipe before launch to select the fallback.");
+                }
                 if self.cameras.is_empty() { ui.label("Connect a webcam and allow desktop apps under Windows Settings → Privacy → Camera."); }
                 ui.add_space(12.0);
                 let fresh = running && latest.is_some_and(|d| d.received.elapsed() < Duration::from_secs(1));
@@ -664,7 +669,7 @@ impl DebugApp {
                 ui.add_space(16.0);
                 ui.separator();
                 ui.heading("Calibrate your minimap gaze");
-                ui.label("About 46 seconds. Follow the dots, then turn your head slightly when asked. Four final targets check the fit. Calibrate in your usual playing position, with glasses if you wear them.");
+                ui.label("About 46 seconds. Follow the dots. Partway through, lean, turn and move a little closer or farther as you normally play. Keep following the dots as you move. Four final targets check the fit, including points just outside the minimap. Use your usual glasses and lighting.");
                 ui.horizontal_wrapped(|ui| {
                     for (label,value) in ["Screen width (mm)","Height (mm)","Assumed distance (mm)"].into_iter().zip(&mut self.measurements) {
                         ui.horizontal(|ui| { ui.label(label); ui.add(egui::DragValue::new(value).range(100.0..=3000.0)); });
@@ -680,7 +685,7 @@ impl DebugApp {
                 if self.runtime_kind.is_some() { return; }
                 ui.add_space(16.0); ui.separator();
                 ui.heading("Glance test");
-                ui.label("Follow each dot with your eyes; keep your head comfortable and mostly still. Look at the countdown between dots. The main monitor will fill the screen. Esc saves a partial test.");
+                ui.label("Follow each dot with your eyes; move naturally within the range you calibrated. Look at the countdown between dots. The main monitor will fill the screen. Esc saves a partial test.");
                 ui.horizontal(|ui| {
                     ui.label("Duration (seconds)");
                     ui.add(egui::DragValue::new(&mut self.seconds).range(60..=600).speed(6));
@@ -781,7 +786,10 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
         } else {
             "Eyes unknown / occluded"
         });
-        ui.label(format!("{:.1} fps · {:.2} ms CPU/frame", d.fps, d.cpu_ms));
+        ui.label(format!(
+            "{:.1} fps · {:.2} ms Rust inference CPU/frame",
+            d.fps, d.cpu_ms
+        ));
     });
     ui.add(egui::ProgressBar::new(d.sample.quality).text(format!(
         "Tracking quality {:.0}% · heuristic, not accuracy",
@@ -793,7 +801,7 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
             egui::Grid::new("feature-values")
                 .striped(true)
                 .show(ui, |ui| {
-                    for (i, name) in FEATURE_NAMES.iter().enumerate() {
+                    for (i, name) in feature_names(d.feature_kind).iter().enumerate() {
                         ui.label(*name);
                         ui.monospace(d.raw.map_or_else(|| "—".into(), |f| format!("{:.4}", f[i])));
                         ui.end_row();
@@ -802,7 +810,7 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
         });
         ui.add_space(20.0);
         ui.vertical(|ui| {
-            ui.label("Coarse eye direction");
+            ui.label("Coarse camera-space direction");
             let (rect, _) = ui.allocate_exact_size(Vec2::new(200.0, 150.0), egui::Sense::hover());
             let p = ui.painter();
             p.rect_stroke(
@@ -820,8 +828,16 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
                 Stroke::new(1.0, Color32::DARK_GRAY),
             );
             if let Some(f) = d.raw {
-                let x = ((f[0] + f[3]) / 2.0).clamp(0.0, 1.0);
-                let y = ((f[1] + f[4]) / 2.0).clamp(0.0, 1.0);
+                let (x, y) = match d.feature_kind {
+                    lucas_gaze::features::FeatureKind::MediaPipe => (
+                        ((f[0] + f[3]) / 2.0).clamp(0.0, 1.0),
+                        ((f[1] + f[4]) / 2.0).clamp(0.0, 1.0),
+                    ),
+                    lucas_gaze::features::FeatureKind::UniGaze => (
+                        (0.5 + f[1] / std::f32::consts::PI).clamp(0.0, 1.0),
+                        (0.5 + f[0] / std::f32::consts::PI).clamp(0.0, 1.0),
+                    ),
+                };
                 p.circle_filled(
                     Pos2::new(
                         rect.left() + x * rect.width(),

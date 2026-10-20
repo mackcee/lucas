@@ -80,20 +80,23 @@ or `lucas --seconds 600` for the standalone shared gaze window.
 ## Data boundary
 
 The UI and recorder receive only `GazeSample`, derived feature arrays and numeric
-telemetry. RGB never crosses that boundary; `lucas-gaze` clears its in-memory frame
-ring after inference. There is no screenshot, video, image serializer, upload,
+telemetry. RGB never crosses that UI/recorder boundary; `lucas-gaze` clears its
+owned frame buffers after inference. UniGaze receives the current RGB frame only
+in its LUCAS-owned local process, through anonymous pipes. There is no screenshot, video, image serializer, upload,
 background trace or crash-dump facility. Model inputs stay in the gaze pipeline.
 Starting the camera alone writes no trace. Every new recording requires consent.
 
-A dedicated below-normal-priority thread captures and infers. The UI reads a
+A below-normal-priority thread captures into a single replaceable frame slot;
+a separate worker infers the latest frame with the selected gaze source. The UI reads a
 single latest numeric sample, so it cannot queue camera frames. Trace writing
 happens on the capture thread, independently of the UI refresh rate. Samples
 acquired before the first target presentation or outside the script duration
-are not written. CPU time is capture/inference **thread CPU time**, not blocking
-camera wall time. FPS is measured over the latest 60 acquisition timestamps.
+are not written. CPU time is the Rust **inference/recording thread CPU time**,
+not camera wall time; it excludes the separate capture thread and UniGaze process/GPU work. Use
+`--check-gaze-model` for full-pipeline/model timing. FPS is measured over the latest 60 acquisition timestamps.
 The quality value is a heuristic, never a claim about detection accuracy.
 
-## JSON-lines schema v1
+## JSON-lines schema v2 (v1 remains readable)
 
 One UTF-8 JSON object per line: a header, frame records, then an end record.
 The authoritative field names, types, enum spellings and validation limits are
@@ -103,11 +106,13 @@ types in [`script.rs`](src/script.rs) and minimap metadata in
 schema. `timestamp_ns` is relative to test start; `source_timestamp_ns` preserves
 the camera-open origin.
 
-Feature arrays follow `trace::FEATURE_NAMES` in [`trace.rs`](src/trace.rs).
-Head angles are in radians; relative distance is inverse fit scale, not metres.
-Right/left are anatomical; eye coordinates are in the unmirrored camera image.
-`raw_features` is extraction before smoothing; `features` is the M4.1 One-Euro
-output. Both are null for unknown/closed/occluded eyes, even when a face is found.
+Each v2 frame carries `feature_kind`: `media_pipe` or `uni_gaze`. Legacy v1
+frames default to MediaPipe; mixing sources in one trace is rejected. Arrays
+follow `trace::feature_names(kind)` in [`trace.rs`](src/trace.rs). MediaPipe eye
+ratios/relative distance retain their original units; UniGaze uses camera-space
+pitch/yaw in radians, apertures, normalized head pose, and face centre in mm.
+Right/left eyes are anatomical; images are unmirrored. `raw_features` precedes
+smoothing; `features` is One-Euro output (only the two angles for UniGaze). Both are null for unknown/closed/occluded eyes, even when a face is found.
 Unknown frames always have zero quality and are never silently counted as checks.
 
 `target` is null outside focused `hold` phases. During a hold it contains a unique
@@ -165,9 +170,13 @@ Defaults are 531×299 mm and 650 mm (24-inch 16:9); Windows DPI is not physical 
 Use your usual playing position and glasses. The same main-monitor fullscreen
 window/amber dot renderer as the glance test presents a 46-second sequence:
 
-- Nine grid points, centre/ability bar/scoreboard/lane-above/lane-beside negatives.
-- Five dense minimap-corner points, the last two with a slight head turn.
-- Four independent validation targets (two map looks, centre and lane beside).
+- Nine grid points in a comfortable position.
+- From 18 seconds, five dense map points interleaved with centre/ability bar/
+  scoreboard/lane-above/lane-beside negatives. Shift naturally through this block:
+  lean, turn and move a little closer or farther while following the dots.
+- Four independent validation occurrences: two map looks and points just above
+  and beside the map. Both source identity and the rectangular decision are
+  versioned in saved calibration; older half-plane fits must be repeated.
 
 The map comes from `lucas-geometry` using the League settings and the saved
 alignment profile for the main-monitor resolution, MinimapScale and flip. See the
@@ -217,5 +226,8 @@ CI builds on GitHub-hosted Windows/MSVC, copies pinned models and native DLLs,
 adds app-local VC runtimes and notices, zips the bundle, then runs
 `--check-runtime` from the extracted ZIP with a system-only PATH. ONNX Runtime
 1.31 is statically linked by ort rc.14; its DirectML DLL is still included even
-though LUCAS explicitly selects only the CPU provider. Font and binary runtime
+though the MediaPipe fallback selects only the CPU provider. The optional
+UniGaze installer/scripts are packaged through an explicit allowlist, never
+installed weights, Python environments or caches. See
+[UniGaze setup](../../models/unigaze/README.md) for CUDA and diagnostic details. Font and binary runtime
 licenses remain their upstream licenses; LUCAS source remains MIT OR Apache-2.0.

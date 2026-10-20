@@ -4,7 +4,9 @@ use crate::{
     script::{Phase, Target, TargetKind},
     settings::MinimapSelection,
 };
-use lucas_gaze::{GazeFeatures, GazeSample, GazeSource, source::TraceGazeSource};
+use lucas_gaze::{
+    GazeFeatures, GazeSample, GazeSource, features::FeatureKind, source::TraceGazeSource,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -24,6 +26,24 @@ pub const FEATURE_NAMES: [&str; 10] = [
     "head_roll_rad",
     "head_relative_distance",
 ];
+pub const UNIGAZE_FEATURE_NAMES: [&str; 10] = [
+    "gaze_pitch_rad",
+    "gaze_yaw_rad",
+    "right_eye_aperture",
+    "left_eye_aperture",
+    "normalized_head_pitch_rad",
+    "normalized_head_yaw_rad",
+    "normalized_head_roll_rad",
+    "face_x_mm",
+    "face_y_mm",
+    "face_z_mm",
+];
+pub fn feature_names(kind: FeatureKind) -> &'static [&'static str; 10] {
+    match kind {
+        FeatureKind::MediaPipe => &FEATURE_NAMES,
+        FeatureKind::UniGaze => &UNIGAZE_FEATURE_NAMES,
+    }
+}
 const MAX_LINE: u64 = 16 * 1024;
 const MAX_FRAMES: usize = 120_000; // At most one hour at 30fps, with headroom.
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -51,7 +71,7 @@ pub struct Header {
 }
 impl Header {
     fn validate(&self) -> Result<()> {
-        if self.schema_version != 1 {
+        if !matches!(self.schema_version, 1 | 2) {
             return Err("unsupported trace schema version".into());
         }
         if self.camera.name.len() > 1024
@@ -79,7 +99,11 @@ pub struct FrameRecord {
     pub timestamp_ns: u64,
     /// Original GazeSource timestamp relative to camera-open (preserved for audit).
     pub source_timestamp_ns: u64,
-    /// One-Euro-smoothed uncalibrated eye/pose values in FEATURE_NAMES order.
+    /// Version 1 traces without this field are MediaPipe. Version 2 explicitly
+    /// distinguishes camera-space gaze angles from landmark features.
+    #[serde(default)]
+    pub feature_kind: FeatureKind,
+    /// Source-specific numeric features; only gaze angles are smoothed for UniGaze.
     pub features: Option<[f32; 10]>,
     /// Same extraction before smoothing, useful for later calibration experiments.
     pub raw_features: Option<[f32; 10]>,
@@ -94,15 +118,18 @@ impl FrameRecord {
     pub fn sample(&self) -> GazeSample {
         GazeSample {
             timestamp: Duration::from_nanos(self.timestamp_ns),
-            features: self.features.map(GazeFeatures::from_array),
+            features: self
+                .features
+                .map(|v| GazeFeatures::from_array_for(self.feature_kind, v)),
             quality: self.quality,
         }
     }
     fn validate(&self, header: &Header) -> Result<()> {
         TraceGazeSource::new(std::iter::once(self.sample())).next_sample()?;
-        if self
-            .raw_features
-            .is_some_and(|v| v.iter().any(|x| !x.is_finite()))
+        if (header.schema_version == 1 && self.feature_kind != FeatureKind::MediaPipe)
+            || self
+                .raw_features
+                .is_some_and(|v| v.iter().any(|x| !x.is_finite()))
             || self.raw_features.is_some() != self.features.is_some()
             || (!self.face_found && self.features.is_some())
             || !self.cpu_ms.is_finite()
@@ -147,6 +174,7 @@ pub struct TraceWriter<W: Write> {
     header: Header,
     frames: usize,
     previous: Option<(u64, u64)>,
+    feature_kind: Option<FeatureKind>,
 }
 impl<W: Write> TraceWriter<W> {
     pub fn new(mut output: W, header: Header) -> Result<Self> {
@@ -158,10 +186,18 @@ impl<W: Write> TraceWriter<W> {
             header,
             frames: 0,
             previous: None,
+            feature_kind: None,
         })
     }
     pub fn frame(&mut self, frame: FrameRecord) -> Result<()> {
         frame.validate(&self.header)?;
+        if self
+            .feature_kind
+            .is_some_and(|kind| kind != frame.feature_kind)
+        {
+            return Err("gaze source changed during trace; start a new recording".into());
+        }
+        self.feature_kind = Some(frame.feature_kind);
         check_order(self.previous, &frame)?;
         if self.frames >= MAX_FRAMES {
             return Err("trace frame limit exceeded".into());
@@ -227,10 +263,15 @@ pub fn read_trace(mut input: impl BufRead) -> Result<Trace> {
     header.validate()?;
     let mut frames = Vec::new();
     let mut previous = None;
+    let mut feature_kind = None;
     loop {
         match read_record(&mut input)? {
             Some(Record::Frame(f)) => {
                 f.validate(&header)?;
+                if feature_kind.is_some_and(|kind| kind != f.feature_kind) {
+                    return Err("trace mixes gaze sources".into());
+                }
+                feature_kind = Some(f.feature_kind);
                 check_order(previous, &f)?;
                 if frames.len() >= MAX_FRAMES {
                     return Err("trace frame limit exceeded".into());
@@ -284,6 +325,7 @@ impl Distribution {
 }
 #[derive(Debug, Default)]
 pub struct Summary {
+    pub feature_kind: FeatureKind,
     pub frames: usize,
     pub valid_frames: usize,
     pub fps: f64,
@@ -312,7 +354,7 @@ impl Summary {
         for kind in [TargetKind::Minimap, TargetKind::Elsewhere] {
             writeln!(output, "{kind:?}:")?;
             if let Some(stats) = self.distributions.get(&kind) {
-                for (name, stat) in FEATURE_NAMES.iter().zip(stats) {
+                for (name, stat) in feature_names(self.feature_kind).iter().zip(stats) {
                     writeln!(
                         output,
                         "  {name}: n={} mean={:.5} std={:.5} min={:.5} max={:.5}",
@@ -330,7 +372,13 @@ impl Summary {
 /// tracking loss and countdown. Only labelled hold frames enter distributions.
 pub fn summarize(trace: &Trace) -> Result<Summary> {
     let mut source = TraceGazeSource::new(trace.frames.iter().map(FrameRecord::sample));
-    let mut result = Summary::default();
+    let mut result = Summary {
+        feature_kind: trace
+            .frames
+            .first()
+            .map_or(FeatureKind::MediaPipe, |f| f.feature_kind),
+        ..Summary::default()
+    };
     let mut first = None;
     let mut last = Duration::ZERO;
     for frame in &trace.frames {
@@ -387,6 +435,7 @@ mod tests {
     }
     fn frame(n: u64, value: Option<f32>, kind: Option<TargetKind>) -> FrameRecord {
         FrameRecord {
+            feature_kind: FeatureKind::MediaPipe,
             timestamp_ns: n * 100_000_000,
             source_timestamp_ns: n * 100_000_000,
             features: value.map(|v| [v; 10]),
@@ -452,7 +501,7 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
         assert!(
             read_trace(
-                text.replace("\"schema_version\":1", "\"schema_version\":2")
+                text.replace("\"schema_version\":1", "\"schema_version\":3")
                     .as_bytes()
             )
             .is_err()
@@ -487,6 +536,39 @@ mod tests {
         assert!(writer.frame(frame(0, Some(f32::NAN), None)).is_err());
         writer.frame(frame(1, None, None)).unwrap();
         assert!(writer.frame(frame(1, None, None)).is_err());
+    }
+    #[test]
+    fn unigaze_traces_are_typed_and_legacy_traces_remain_readable() {
+        let mut h = header();
+        h.schema_version = 2;
+        let mut f = frame(1, Some(0.2), Some(TargetKind::Minimap));
+        f.feature_kind = FeatureKind::UniGaze;
+        let mut writer = TraceWriter::new(Vec::new(), h).unwrap();
+        writer.frame(f.clone()).unwrap();
+        let bytes = writer.finish(EndReason::Completed).unwrap();
+        let trace = read_trace(bytes.as_slice()).unwrap();
+        assert_eq!(
+            trace.frames[0].sample().features.unwrap().kind(),
+            FeatureKind::UniGaze
+        );
+        assert_eq!(
+            summarize(&trace).unwrap().feature_kind,
+            FeatureKind::UniGaze
+        );
+        let mut writer = TraceWriter::new(Vec::new(), trace.header).unwrap();
+        writer.frame(f).unwrap();
+        assert!(writer.frame(frame(2, None, None)).is_err());
+        let old = String::from_utf8(synthetic())
+            .unwrap()
+            .replace("\"feature_kind\":\"media_pipe\",", "");
+        assert_eq!(
+            read_trace(old.as_bytes()).unwrap().frames[0]
+                .sample()
+                .features
+                .unwrap()
+                .kind(),
+            FeatureKind::MediaPipe
+        );
     }
     #[test]
     fn empty_and_single_frame_summaries_are_finite() {

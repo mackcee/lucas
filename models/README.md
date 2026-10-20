@@ -1,6 +1,10 @@
 # Offline gaze models
 
-The two checked-in ONNX files are the CPU models used by `lucas-gaze`:
+UniGaze-H + SFD/FAN is the optional default NVIDIA tracker after its
+[one-time setup](unigaze/README.md). Its weights are **not committed or bundled**;
+the installer verifies published assets and installs a private CUDA runtime.
+
+The two checked-in ONNX files are the selectable MediaPipe CPU fallback:
 
 | File | Input (RGB, NHWC) | Outputs |
 | --- | --- | --- |
@@ -41,7 +45,7 @@ Reference decoder contracts:
 
 ## Verify or convert (development only)
 
-Normal builds/tests need no Python or model download:
+Normal Rust builds/tests of the MediaPipe fallback need no Python or model download:
 
 ```sh
 cargo xtask models verify
@@ -52,7 +56,8 @@ cargo bench -p lucas-gaze --bench pipeline
 
 `ort` downloads its native **runtime library at build time**, not models. Releases
 must package the matching runtime library where required by the target. Defaults
-use one CPU inference thread, no parallel operators, no idle spin and no GPU.
+for the MediaPipe fallback use one CPU inference thread, no parallel operators,
+no idle spin and no GPU. UniGaze uses its own explicit CUDA child, not this ORT runtime.
 
 To convert once, on Linux x86_64 with Python 3.12 (use a temporary venv):
 

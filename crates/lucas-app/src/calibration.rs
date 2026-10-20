@@ -68,30 +68,32 @@ impl CalibrationScript {
         let [l, t, r, b] = screen.minimap;
         let centre = [(l + r) / 2.0, (t + b) / 2.0];
         let beside = if settings.flipped { r + 0.04 } else { l - 0.04 };
-        for p in [
+        // Shift naturally from 18 seconds onward. Interleave both classes so
+        // movement is not accidentally a proxy for a minimap label. Include the
+        // two in-screen boundaries (horizontal neighbour and above), mirrored
+        // for a flipped map. Outer right/bottom targets would be off-monitor.
+        let elsewhere = [
             [0.5, 0.5],
             [0.5, 0.92],
             [0.92, 0.08],
             [centre[0], t - 0.04],
             [beside, centre[1]],
-        ] {
-            s.push(p, Stage::Fit, false);
-        }
-        // Five dense map positions, with the last two at a second head pose.
-        for (i, [x, y]) in [[0.3, 0.3], [0.7, 0.3], [0.5, 0.5], [0.3, 0.7], [0.7, 0.7]]
+        ];
+        for ([x, y], away) in [[0.3, 0.3], [0.7, 0.3], [0.5, 0.5], [0.3, 0.7], [0.7, 0.7]]
             .into_iter()
-            .enumerate()
+            .zip(elsewhere)
         {
-            s.push([l + (r - l) * x, t + (b - t) * y], Stage::Fit, i >= 3);
+            s.push([l + (r - l) * x, t + (b - t) * y], Stage::Fit, true);
+            s.push(away, Stage::Fit, true);
         }
-        // Four held-out target occurrences; never enter the fit matrix.
-        for (p, turned) in [
-            (centre, true),
-            ([0.5, 0.5], false),
-            ([l + (r - l) * 0.6, t + (b - t) * 0.6], false),
-            ([beside, centre[1]], false),
+        // Four held-out occurrences, including both near-boundary confusers.
+        for p in [
+            centre,
+            [centre[0], t - 0.04],
+            [l + (r - l) * 0.6, t + (b - t) * 0.6],
+            [beside, centre[1]],
         ] {
-            s.push(p, Stage::Validate, turned);
+            s.push(p, Stage::Validate, true);
         }
         if s.targets
             .iter()
@@ -380,6 +382,26 @@ mod tests {
                         .iter()
                         .any(|t| t.turned && t.target.kind == TargetKind::Minimap)
                 );
+                for kind in [TargetKind::Minimap, TargetKind::Elsewhere] {
+                    assert!(
+                        s.targets
+                            .iter()
+                            .any(|t| t.stage == Stage::Fit && t.turned && t.target.kind == kind)
+                    );
+                }
+                assert!(s.targets[..9].iter().all(|t| !t.turned));
+                let [l, top, right, _] = s.screen.minimap;
+                assert!(
+                    s.targets
+                        .iter()
+                        .any(|t| t.stage == Stage::Validate && t.target.position[1] < top)
+                );
+                assert!(s.targets.iter().any(|t| t.stage == Stage::Validate
+                    && if flipped {
+                        t.target.position[0] > right
+                    } else {
+                        t.target.position[0] < l
+                    }));
                 assert_eq!(s.at(Duration::ZERO).unwrap().0.phase, Phase::Countdown);
                 assert_eq!(s.at(SETTLE).unwrap().0.phase, Phase::Hold);
                 assert!(s.at(s.duration()).is_none());

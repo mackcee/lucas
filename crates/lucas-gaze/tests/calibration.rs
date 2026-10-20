@@ -71,7 +71,7 @@ fn fit_heldout_roundtrip_and_compact_versioned_weights() {
     bad[7] = b'9';
     assert!(CalibrationModel::from_bytes(&bad).is_err());
     let mut bad = bytes.clone();
-    bad[17..25].copy_from_slice(&f64::NAN.to_le_bytes());
+    bad[18..26].copy_from_slice(&f64::NAN.to_le_bytes());
     assert!(CalibrationModel::from_bytes(&bad).is_err());
     let mut bad = bytes;
     bad.push(0);
@@ -88,8 +88,8 @@ fn noisy_validation_sets_conservative_threshold_and_reports_misses() {
     // Threshold selection cannot leak validation observations into the weights.
     let clean = fit(&data(false), &data(false), screen(), FitOptions::default()).unwrap();
     assert_eq!(
-        &model.to_bytes()[17..17 + 53 * 8],
-        &clean.to_bytes()[17..17 + 53 * 8]
+        &model.to_bytes()[18..18 + 44 * 8],
+        &clean.to_bytes()[18..18 + 44 * 8]
     );
 }
 #[test]
@@ -178,14 +178,27 @@ fn detector_dwell_unknown_blinks_offscreen_and_stream_gaps() {
             .check_started
     );
     let mut blink = sample(0.94, 0.9, 1050);
-    blink.features.as_mut().unwrap().eyes[0].aperture = 0.01;
+    blink
+        .features
+        .as_mut()
+        .unwrap()
+        .landmarks_mut()
+        .unwrap()
+        .eyes[0]
+        .aperture = 0.01;
     assert_eq!(detector.observe(blink).unwrap().state, GazeState::Unknown);
     assert!(model.predict(sample(1.2, 1.2, 0)).is_none());
     let mut low = sample(0.94, 0.9, 0);
     low.quality = 0.1;
     assert!(model.predict(low).is_none());
     let mut nan = sample(0.94, 0.9, 0);
-    nan.features.as_mut().unwrap().head.yaw = f32::NAN;
+    nan.features
+        .as_mut()
+        .unwrap()
+        .landmarks_mut()
+        .unwrap()
+        .head
+        .yaw = f32::NAN;
     assert!(model.predict(nan).is_none());
 }
 #[test]

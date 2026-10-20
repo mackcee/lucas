@@ -46,6 +46,9 @@ fn portrait_detects_478_points_tracks_iris_and_reacquires() {
             face.presence,
             tracker.stats()
         );
+        let lucas_gaze::GazeFeatures::Landmarks(features) = features else {
+            panic!("MediaPipe features expected")
+        };
         for e in features.eyes {
             assert!(
                 (0.2..0.8).contains(&e.horizontal),

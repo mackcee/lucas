@@ -31,6 +31,7 @@ fn replay_cli_reports_synthetic_trace_and_rejects_missing_end() {
         let valid = i < 2;
         writer
             .frame(FrameRecord {
+                feature_kind: Default::default(),
                 timestamp_ns: i * 100_000_000,
                 source_timestamp_ns: i * 100_000_000,
                 features: valid.then_some([i as f32; 10]),
@@ -129,6 +130,7 @@ fn scripted_session_replays_only_valid_focused_holds() {
         let valid = !i.is_multiple_of(10);
         writer
             .frame(FrameRecord {
+                feature_kind: Default::default(),
                 timestamp_ns,
                 source_timestamp_ns: timestamp_ns + 5_000_000_000,
                 features: valid.then_some([value; 10]),

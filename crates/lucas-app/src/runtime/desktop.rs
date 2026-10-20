@@ -221,7 +221,15 @@ impl Desktop {
                 self.runtime.settings().camera_index,
                 self.models.clone(),
                 self.origin,
+                self.runtime
+                    .model
+                    .as_ref()
+                    .ok_or("calibration unavailable")?
+                    .feature_kind(),
             )?);
+        }
+        if let Some(notice) = self.camera.as_ref().and_then(CameraWorker::take_notice) {
+            self.controls_notice = Some(notice);
         }
         let sample = self.camera.as_ref().and_then(CameraWorker::take_sample);
         let previous = self.runtime.sequence;

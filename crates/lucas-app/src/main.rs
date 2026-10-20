@@ -13,7 +13,7 @@ mod setup_ui;
 
 use std::{path::PathBuf, process::ExitCode};
 
-const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --check-camera\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\n--check-camera: headless 3-second camera index 0 check; prints format and timing only.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
+const HELP: &str = "LUCAS gaze diagnostics (Windows)\n\nUsage: lucas --timer\n       lucas --show-postgame <demo|games.sqlite3|data-directory>\n       lucas --seconds 600 [--models directory]\n       lucas --calibrate [--models directory]\n       lucas --check-runtime\n       lucas --check-camera\n       lucas --check-gaze-model [--models directory]\n       lucas --version\n\nNo arguments starts gaze coaching in the notification area. --timer selects the explicit no-gaze fallback.\nSet LUCAS_LEAGUE_ROOT for a custom League install folder.\n\nConnect your camera in the debug window, then opt in to a numeric-only glance test.\nDuration: 60..600 seconds, in multiples of 6. No images are recorded.\n--check-camera: headless 3-second camera index 0 check; prints format and timing only.\n--check-gaze-model: bounded CUDA model diagnostic on a bundled public face; never opens a camera.\nLUCAS_GAZE_SOURCE=auto (default), unigaze, or mediapipe selects the tracker for all app modes.\nEsc cancels a test and saves a partial trace. No files are uploaded.";
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -92,6 +92,7 @@ fn run() -> Result<(), String> {
         .ok_or("cannot locate executable directory")?
         .join("models");
     let mut check_runtime = false;
+    let mut check_gaze_model = false;
     let mut runtime_calibration = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -113,6 +114,7 @@ fn run() -> Result<(), String> {
             }
             "--models" => models = PathBuf::from(args.next().ok_or("--models needs a directory")?),
             "--check-runtime" => check_runtime = true,
+            "--check-gaze-model" => check_gaze_model = true,
             "--runtime-calibrate" => runtime_calibration = Some(None),
             "--runtime-quick" => {
                 runtime_calibration =
@@ -126,6 +128,26 @@ fn run() -> Result<(), String> {
                 std::process::exit(2);
             }
         }
+    }
+    if check_gaze_model {
+        let arguments: Vec<_> = std::env::args().skip(1).collect();
+        let valid = arguments.as_slice() == ["--check-gaze-model"]
+            || (arguments.len() == 3
+                && arguments[0] == "--check-gaze-model"
+                && arguments[1] == "--models")
+            || (arguments.len() == 3
+                && arguments[0] == "--models"
+                && arguments[2] == "--check-gaze-model");
+        if !valid {
+            return Err(
+                "Usage: lucas --check-gaze-model [--models directory] (no other modes)".into(),
+            );
+        }
+        let result = lucas_gaze::unigaze::UniGaze::start(&models)
+            .and_then(|mut source| source.check())
+            .map_err(|e| e.to_string())?;
+        println!("{result}");
+        return Ok(());
     }
     lucas_app::script::validate_duration(seconds).map_err(str::to_owned)?;
     #[cfg(windows)]

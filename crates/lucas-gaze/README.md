@@ -1,7 +1,7 @@
 # lucas-gaze
 
-Offline, single-player webcam → landmarks → filtered gaze features → per-user
-minimap classifier. Camera capture remains independent of calibration and decisions.
+Offline, single-player webcam → UniGaze-H CUDA gaze angles (or MediaPipe
+landmarks) → personal screen mapping → rectangular minimap probability. Camera capture remains independent of calibration and decisions.
 
 - `Camera::capture` fills caller-owned RGB8 storage; `false` means end-of-source.
 - `NokhwaCamera` (Windows/default `camera` feature) uses synchronous Media
@@ -17,7 +17,13 @@ minimap classifier. Camera capture remains independent of calibration and decisi
   after tracking loss, an error, a frame-size change, or a >250 ms frame gap.
   Face presence is a sigmoid, not the raw model logit. All 478 points, including
   ten iris points, are projected to the unmirrored full-camera coordinate system.
-- `WebcamGazeSource` owns a fixed three-frame ring. Processing is synchronous;
+- `ModelGazeSource` is the app's shared selectable source. UniGaze uses the
+  supervised [CUDA sidecar](../../models/unigaze/README.md), while MediaPipe stays
+  available through `LUCAS_GAZE_SOURCE=mediapipe`. `LatestCamera` captures on its
+  own thread and replaces one slot; a slow inference never accumulates a queue.
+  Original acquisition timestamps survive IPC and are checked on return. Source
+  changes invalidate calibration. Startup/failure is visible, not a CPU fallback.
+- The original `WebcamGazeSource` owns a fixed three-frame ring. Processing is synchronous;
   there is no producer queue to accumulate delayed images. Caller scheduling
   should drop work instead of enqueueing frames, and drop the source to release
   the camera when inactive. It clears pixels after inference on success/error.
@@ -25,11 +31,14 @@ minimap classifier. Camera capture remains independent of calibration and decisi
   An outer `None` is end-of-source. Eyes closed/occluded, invalid geometry, and
   out-of-frame eyes become unknown. Quality is a heuristic, not calibrated
   accuracy or a guarantee the player is looking at the screen.
-- Feature vectors contain each iris in its eye-corner/lid coordinate system,
+- MediaPipe feature vectors contain each iris in its eye-corner/lid coordinate system,
   aperture, canonical-fit yaw/pitch/roll and inverse relative face scale. The
   latter is not distance in metres. One-Euro filters use monotonic timestamps
   and reset on loss/gaps. `calibration` maps these unmirrored features into screen
   coordinates and minimap probability; `decision` bridges into the core detector.
+  `GazeFeatures::UniGaze` explicitly represents two camera-space angles, eye
+  apertures, normalized pose and face centre. Only its two angles enter the fit;
+  pose/quality cannot become a short-calibration label shortcut.
 
 ## Acquisition timing
 
@@ -82,8 +91,11 @@ inference but never open a live camera; the MVP capture backend is Windows only.
 ## Per-user calibration (M5.1)
 
 `calibration::fit(training, validation, screen, options)` standardizes the ten
-features using **training-only** means/stddevs and fits an L2-regularized,
-class-balanced logistic classifier plus two ridge regressors (screen x/y).
+MediaPipe features (or two UniGaze angles) using **training-only** means/stddevs
+and fits two ridge regressors (screen x/y). The probability is the minimum of
+four sigmoid scores, one for each minimap edge, scaled by training residuals.
+All four sides must agree; a half-plane cannot extrapolate positives above or
+beside a rectangular map.
 Supply distinct target occurrences to fit and threshold validation; never split
 adjacent frames from one fixation between them. Both classes need at least 12
 usable samples in each set. Defaults: regularization 0.01, empirical target
@@ -93,8 +105,9 @@ The held-out mean angular error is measured between screen rays using physical
 monitor dimensions and an explicitly recorded assumed viewing distance. The
 minimap zone is inflated by that error via `lucas-geometry`, clipped to screen.
 `predict` returns `None` for no features, closed eyes, low quality (<0.5), extreme
-head angles, or an off-screen ridge estimate. The inflated zone is a guard on
-logistic positives, **never** a second way to create checks. Point estimates are
+head angles, a different source identity, or an off-screen ridge estimate.
+Inflated geometry is diagnostic only; it never expands the rectangle used for
+positive checks. Point estimates are
 diagnostic, not precise screen gaze. Webcam off-screen rejection is a heuristic;
 real recordings, especially boundary looks, remain essential.
 
@@ -119,13 +132,15 @@ unseen-population false-positive bound. `cargo xtask eval` measures held-out
 
 ## Privacy boundary
 
-There is no frame writer, serializer, networking, or pixel logging. `Frame` debug
+There is no frame file writer, network inference or pixel logging. RGB travels
+only through a local anonymous pipe to the owned UniGaze child when selected. `Frame` debug
 output is redacted and owned RGB allocations are scrubbed on clear/drop. Model
 input staging buffers are scrubbed after inference. Drivers, decoders, and runtime
 arenas may allocate transient working memory; this is not a claim of OS-level
 locked memory or protection from swap/process dumps. Do not configure a crash
-reporter to upload process memory. Models are always loaded locally with compiled
-SHA-256 verification and runtime telemetry disabled.
+reporter to upload process memory. MediaPipe models are loaded with compiled SHA-256 verification and telemetry
+disabled. UniGaze verifies the packaged asset lock before loading local weights
+and the official ZIP source; only the explicit setup command downloads assets.
 
 See [models](../../models/README.md) for provenance, conversion, tests and the CPU
 guard. Linux fixture tests and an MSVC cross-check do not replace live Windows

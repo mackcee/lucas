@@ -47,6 +47,12 @@ Diagnostics use `lucas-game` to locate minimap settings and make no network requ
 `lucas --calibrate` and follow the [calibration guide](crates/lucas-app/README.md#in-app-calibration).
 For offline recording evaluation, see the [G2 evaluator](xtask/README.md#g2-calibration-and-glance-evaluation).
 
+**UniGaze-H CUDA tracking** is now available with the robust SFD/FAN face frontend.
+It becomes the default after the [one-time NVIDIA setup](docs/testing-on-windows.md#one-time-unigaze-setup-nvidia-cuda);
+MediaPipe remains selectable. Calibration asks for natural movement and uses a
+rectangular minimap decision. **Real-webcam calibration and G2 acceptance remain
+pending**; adding a stronger model is not a claim that the accuracy gate is met.
+
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
 can also be built and checked on Linux. Builds will initially be unsigned.
@@ -56,6 +62,7 @@ can also be built and checked on Linux. Builds will initially be unsigned.
 1. **Download** the Windows build from [GitHub Actions](https://github.com/mackcee/lucas/actions)
    (see the [download steps](docs/testing-on-windows.md)). Extract the whole archive,
    keeping `models/` and the runtime DLLs beside `lucas.exe`. Builds are unsigned.
+   For NVIDIA gaze tracking, run the [UniGaze setup and headless GPU check](docs/testing-on-windows.md#one-time-unigaze-setup-nvidia-cuda) before calibrating.
 2. **Run `lucas.exe`.** First-run setup walks through camera choice and live tracking
    quality, a skippable Borderless check, calibration, next-game minimap alignment
    and a starting level. Frames are never stored; nothing leaves your PC. Closing
@@ -99,8 +106,10 @@ for local trace location, deletion and explicit sharing.
 The tray persists alignment profiles and user-requested numeric geometry reports
 in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only
 mode disables polling (an already-running request may finish).
-Developer build and dependency-check tools may access package registries and
-advisory databases.
+The explicit one-time UniGaze installer downloads published models and dependencies;
+it never opens the camera. App inference remains offline in a LUCAS-owned local
+process. Developer build and dependency-check tools may access package registries
+and advisory databases.
 
 ## Build and check
 
@@ -162,10 +171,10 @@ metric interpretation and integration.
 | `xtask` | Synthetic-player simulator, trace replay and G2 evaluation, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
-[above](#status). The gaze library uses hash-pinned MediaPipe models through ONNX
-Runtime behind a `GazeSource` trait; see
-[`models/README.md`](models/README.md) for attribution and development-only
-conversion commands. Models are never downloaded at application runtime.
+[above](#status). The gaze library exposes a `GazeSource` boundary for the optional
+hash-pinned UniGaze CUDA sidecar and the MediaPipe/ONNX Runtime fallback. See
+[`models/README.md`](models/README.md) for attribution, setup and conversion
+commands. Models are never downloaded at application runtime.
 
 ## License
 
