@@ -58,6 +58,11 @@ class Pipeline:
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TORCH_HOME"] = str(root / "cache")
         os.environ["NUMBA_CACHE_DIR"] = str(root / "cache" / "numba")
+        for key, directory in (("CUDA_CACHE_PATH", "cuda"), ("TMP", "tmp"),
+                               ("TEMP", "tmp"), ("TMPDIR", "tmp")):
+            path = root / "cache" / directory
+            path.mkdir(parents=True, exist_ok=True)
+            os.environ[key] = str(path)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         import torch
         import numpy as np

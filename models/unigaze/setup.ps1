@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Force $bootstrap | Out-Null
 $zip = Join-Path $bootstrap 'uv.zip'
 $uvHash = '5d250c32d3604e28dbe18dc65c668ff628c53e00dde2c642576e831e4a60da64'
 if (!(Test-Path $zip) -or (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $uvHash) {
-    Invoke-WebRequest 'https://github.com/astral-sh/uv/releases/download/0.9.7/uv-x86_64-pc-windows-msvc.zip' -OutFile $zip
+    Invoke-WebRequest -UseBasicParsing 'https://github.com/astral-sh/uv/releases/download/0.9.7/uv-x86_64-pc-windows-msvc.zip' -OutFile $zip
 }
 if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $uvHash) { throw 'uv SHA-256 mismatch; no code executed' }
 Expand-Archive $zip $bootstrap -Force

@@ -30,6 +30,8 @@ For app discovery that directory must be `<models-directory>\unigaze`; pass the
 parent using `lucas --models <models-directory>` in diagnostics. Normal tray use
 looks beside `lucas.exe`. Deleting this directory removes the optional runtime
 and weights, not saved app data. Keep the installer files to reinstall later.
+Python is not added to PATH or the Windows registry. CUDA/Numba caches and child
+temporary files stay inside the installation.
 
 The installer is the only networked part. App startup verifies all asset hashes
 and reads the source directly from its pinned ZIP. There are **no runtime model
@@ -62,7 +64,7 @@ Do not edit a hash to make a failed download pass.
 Regenerate the Windows dependency lock deliberately and review the change:
 
 ```sh
-uv pip compile models/unigaze/requirements.in --python-version 3.12 \
+uv pip compile --no-config models/unigaze/requirements.in --python-version 3.12 \
   --python-platform x86_64-pc-windows-msvc \
   --extra-index-url https://download.pytorch.org/whl/cu128 \
   --index-strategy unsafe-best-match --generate-hashes \
@@ -112,6 +114,19 @@ the CUDA caching allocator is capped at 8 GiB or device capacity, whichever is
 smaller. The diagnostic reports allocated/reserved memory and the peak including
 startup, full-pipeline and model-only median/p95 latency. It runs 3 measured-path
 warmups plus 20 inferences on the public portrait, never on a camera.
+
+### Target-PC headless verification (2026-10-20)
+
+The native Windows installer and diagnostic passed on an RTX 5090 (driver
+616.56, CUDA 12.8/PyTorch 2.7.1). On the public portrait, pipeline median/p95 was
+36.83/37.38 ms; UniGaze alone was 9.13/10.21 ms. CUDA allocator memory was
+1430.2 MiB allocated, 1612.0 MiB reserved, and 5786.8 MiB startup peak. This
+excludes camera acquisition/IPC and is not an in-game performance guarantee.
+The three public/synthetic FP16-vs-FP32 camera-ray deviations were below 0.023°;
+RGB/BGR warp parity was exact. Actual CUDA pipe tests preserved timestamps and
+returned unknown for a blank frame. Missing CUDA, corrupt assets and a missing
+install each failed explicitly with exit 1. **Real-webcam calibration and G2
+acceptance remain pending.**
 
 For GPU development verification, run the installed Python on `validate.py
 --root <install-directory>` from this source checkout. It compares FP16 against
