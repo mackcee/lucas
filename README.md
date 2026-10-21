@@ -70,10 +70,14 @@ can also be built and checked on Linux. Builds will initially be unsigned.
    before Finish discards the draft; reopen **First-run setup…** from the
    notification-area icon to start again. Finish returns to the tray. If Finish
    fails, retry while the window is open (see [save behavior](crates/lucas-app/src/runtime/README.md#before-play)).
-   In your next game, choose **Align minimap…** and follow the
+   **Calibrate once, then play.** LUCAS reuses a passing calibration automatically
+   in every game with the same screen and minimap geometry; there is no per-game
+   quick check. If needed, use **Align minimap…** and the
    [alignment instructions](docs/testing-on-windows.md#one-time-alignment-repeat-whenever-a-patch-moves-the-hud),
-   then complete the tray's quick gaze check before play. Changed geometry may need
-   explicit recalibration.
+   then recalibrate once for the changed layout. **Test gaze** is optional: failing
+   or cancelling it does not discard a valid calibration. If calibration really
+   is missing or mismatched, the tray gives one reason, with numbers under
+   **Calibration details**.
 3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
    move through 8 → 6 → 5 s. Fade levels keep the 5 s goal but delay and soften the
    help, make it intermittent, then turn it off. A saved level applies **next game**,

@@ -37,8 +37,7 @@ impl Desktop {
         let mut runtime = Runtime::new(store.load_settings()?)?;
         // Provisional only: actual game geometry must still match before use.
         let mut calibration_status = CalibrationStatus::default();
-        let model = calibration_status.loaded(calibration::load_explained(&store, None));
-        runtime.install_calibration(model)?;
+        calibration_status.reload(&store, &mut runtime)?;
         Ok(Self {
             runtime,
             camera: None,
@@ -61,7 +60,11 @@ impl Desktop {
         self.calibration_status.issue()
     }
     pub fn calibration_message(&self) -> String {
-        self.calibration_status.tray_message(self.calibrating())
+        match &self.calibration {
+            Some(task) if task.quick => "Test gaze running — coaching paused".into(),
+            Some(_) => "Calibrating gaze — coaching paused".into(),
+            None => self.calibration_status.needed_message(),
+        }
     }
     pub fn editing(&self) -> bool {
         self.controls.is_some()
@@ -72,26 +75,16 @@ impl Desktop {
         }
         self.camera = None;
         self.close_card();
-        if setup {
-            // Explicit setup includes recalibration; stale readiness must not
-            // return when setup is cancelled or the camera choice changes.
-            self.runtime.install_calibration(None)?;
-            self.calibration_status
-                .block(CalibrationIssue::SetupRunning);
-        }
+        // Pause camera ownership and temporal evidence, not the saved fit.
+        // On closing setup we assess what was actually persisted, even on cancel.
+        self.runtime.reset_gaze()?;
         let child = Command::new(std::env::current_exe()?)
             .arg(if setup {
                 "--runtime-setup"
             } else {
                 "--runtime-settings"
             })
-            .spawn()
-            .inspect_err(|error| {
-                if setup {
-                    self.calibration_status
-                        .block(CalibrationIssue::WindowError(error.to_string()));
-                }
-            })?;
+            .spawn()?;
         self.controls = Some((child, setup));
         Ok(())
     }
@@ -102,7 +95,7 @@ impl Desktop {
         let previous = self.runtime.sequence;
         self.runtime.poll(at, snapshot, unix_ms())?;
         self.pending.extend(self.runtime.take_summaries());
-        // A new session invalidates a quick check launched for the previous one.
+        // A session change may make optional test feedback stale, never the fit.
         if previous != self.runtime.sequence {
             self.generation += 1;
             self.camera = None;
@@ -131,8 +124,6 @@ impl Desktop {
                 minimap: map,
             },
             source,
-            self.runtime.calibration(),
-            self.calibrating(),
         );
         if update.changed {
             self.generation += 1;
@@ -145,28 +136,24 @@ impl Desktop {
     fn reload(&mut self) -> Result<()> {
         let store = Store::open()?;
         self.runtime.settings.camera_index = store.load_settings()?.camera_index;
-        let geometry = self
-            .calibration_status
-            .geometry()
-            .map(|g| (&g.screen, g.minimap));
-        let result = calibration::load_explained(&store, geometry);
-        let model = self.calibration_status.loaded(result);
-        self.runtime.install_calibration(model)?;
+        self.calibration_status.reload(&store, &mut self.runtime)?;
         Ok(())
     }
     pub fn launch_calibration(&mut self) -> Result<()> {
+        self.launch_capture(false)
+    }
+    pub fn launch_gaze_test(&mut self) -> Result<()> {
+        self.launch_capture(true)
+    }
+    fn launch_capture(&mut self, quick: bool) -> Result<()> {
         if self.calibration.is_some() || self.editing() {
             return Ok(());
         }
+        if quick && self.runtime.calibration() != CalibrationState::Ready {
+            return Err("Calibrate gaze before using Test gaze".into());
+        }
         self.camera = None; // joined and released before the child can open it
-        if self.runtime.calibration() == CalibrationState::QuickCheck && self.runtime.in_session() {
-            self.reload()?;
-        }
-        let quick = self.runtime.begin_calibration()?;
-        if !quick {
-            self.calibration_status
-                .block(CalibrationIssue::FullCalibrationRunning);
-        }
+        self.runtime.reset_gaze()?;
         let mut command = Command::new(std::env::current_exe()?);
         if quick {
             let model = self
@@ -183,10 +170,7 @@ impl Desktop {
         } else {
             command.arg("--runtime-calibrate");
         }
-        let child = command.spawn().inspect_err(|error| {
-            self.calibration_status
-                .block(CalibrationIssue::WindowError(error.to_string()));
-        })?;
+        let child = command.spawn()?;
         self.calibration = Some(CalibrationTask {
             child,
             quick,
@@ -201,30 +185,21 @@ impl Desktop {
             let (_, setup) = self.controls.take().unwrap();
             self.delete_requested |=
                 status.code() == Some(crate::postgame::DELETE_REQUESTED_EXIT_CODE as i32);
+            if setup && !self.delete_requested {
+                self.reload()?;
+            }
             if status.success() {
                 let settings = Store::open()?.load_settings()?;
                 self.runtime.update_preferences(&settings)?;
-                if setup {
-                    self.reload()?;
-                }
                 self.controls_notice = Some(
                     if setup {
-                        "Setup complete — align the minimap and quick-check before play"
+                        "Setup complete — coaching starts automatically in matching games"
                     } else {
                         "Settings saved — training level applies next game"
                     }
                     .into(),
                 );
             } else if !self.delete_requested {
-                if setup {
-                    self.calibration_status.block(if status.code() == Some(3) {
-                        CalibrationIssue::SetupCancelled
-                    } else {
-                        CalibrationIssue::WindowError(format!(
-                            "Setup exited with {status}; reopen setup."
-                        ))
-                    });
-                }
                 self.controls_notice = Some(
                     if status.code() == Some(3) {
                         "Settings closed; reopen setup from the tray if needed"
@@ -242,19 +217,27 @@ impl Desktop {
             let outcome = CalibrationOutcome::from_code(status.code());
             if task.quick {
                 let same_generation = task.generation == self.generation;
-                self.runtime
-                    .revalidated(status.success() && same_generation)?;
-                self.calibration_status
-                    .quick_finished(outcome, same_generation);
-            } else if status.success() {
-                self.reload()?;
+                self.controls_notice = Some(
+                    self.calibration_status
+                        .finish_test(&mut self.runtime, outcome, same_generation)?
+                        .into(),
+                );
             } else {
-                self.calibration_status
-                    .block(outcome.and_then(|o| o.issue(false)).unwrap_or_else(|| {
-                        CalibrationIssue::WindowError(format!(
-                            "Calibration exited with {status}; retry full calibration."
-                        ))
-                    }));
+                // Failed/cancelled fits never replace a passing persisted fit.
+                // Re-assess the saved file, rather than latching a UI outcome.
+                self.reload()?;
+                self.controls_notice = Some(
+                    match (status.success(), self.runtime.calibration()) {
+                        (true, CalibrationState::Ready) => {
+                            "Calibrated — coaching starts automatically in matching games"
+                        }
+                        (false, CalibrationState::Ready) => {
+                            "Calibration closed — using the usable saved calibration"
+                        }
+                        _ => "Calibration unavailable — see Calibration details",
+                    }
+                    .into(),
+                );
             }
         }
         inputs.paused |= self.calibrating() || self.editing() || self.delete_requested;

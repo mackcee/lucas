@@ -9,16 +9,6 @@ pub enum CalibrationIssue {
     ModelError(String),
     GeometryChanged(Vec<String>),
     ValidationFailed(Validation),
-    FullCalibrationRunning,
-    FullCalibrationCancelled,
-    FullCalibrationFailed,
-    FullCalibrationChanged,
-    SetupRunning,
-    SetupCancelled,
-    QuickCheckCancelled,
-    QuickCheckFailed,
-    QuickCheckChanged,
-    WindowError(String),
 }
 impl CalibrationIssue {
     pub fn summary(&self) -> &'static str {
@@ -28,16 +18,6 @@ impl CalibrationIssue {
             Self::ModelError(_) => "saved model is unsupported or invalid",
             Self::GeometryChanged(_) => "screen or minimap changed",
             Self::ValidationFailed(_) => "saved calibration did not pass",
-            Self::FullCalibrationRunning => "full calibration is running",
-            Self::FullCalibrationCancelled => "full calibration was cancelled",
-            Self::FullCalibrationFailed => "full calibration did not pass",
-            Self::FullCalibrationChanged => "screen changed during calibration",
-            Self::SetupRunning => "setup is running",
-            Self::SetupCancelled => "setup closed without saving",
-            Self::QuickCheckCancelled => "quick check was cancelled",
-            Self::QuickCheckFailed => "quick check did not pass",
-            Self::QuickCheckChanged => "calibration, screen or game changed during the quick check",
-            Self::WindowError(_) => "calibration window could not complete",
         }
     }
     /// Separate native menu rows keep numeric differences readable, rather than
@@ -45,7 +25,7 @@ impl CalibrationIssue {
     pub fn details(&self) -> Vec<String> {
         let mut rows = vec![self.summary().to_owned()];
         match self {
-            Self::ReadError(error) | Self::ModelError(error) | Self::WindowError(error) => {
+            Self::ReadError(error) | Self::ModelError(error) => {
                 rows.push(error.clone());
             }
             Self::GeometryChanged(differences) => rows.extend(differences.iter().cloned()),
@@ -58,19 +38,7 @@ impl CalibrationIssue {
             )),
             _ => {}
         }
-        rows.push(
-            match self {
-                Self::FullCalibrationRunning | Self::SetupRunning => {
-                    "Finish or close the calibration/setup window."
-                }
-                Self::SetupCancelled => {
-                    "Reopen First-run setup from the tray; coaching stays paused."
-                }
-                Self::WindowError(_) => "Reopen calibration from the tray; coaching stays paused.",
-                _ => "Choose Calibrate gaze to run full calibration; coaching stays paused.",
-            }
-            .into(),
-        );
+        rows.push("Choose Calibrate gaze for this screen/minimap; coaching stays paused.".into());
         rows
     }
 }
@@ -82,7 +50,8 @@ impl std::fmt::Display for CalibrationIssue {
 impl std::error::Error for CalibrationIssue {}
 
 /// Used for both the provisional startup load and the authoritative geometry
-/// check. A successful load requests a quick check; it never authorizes coaching.
+/// check. A passing, matching saved fit can be used without a per-game test;
+/// foreground, tracking and all other coaching gates still apply.
 pub fn assess(
     saved: Option<Calibration>,
     geometry: Option<(&ScreenGeometry, [f64; 4])>,

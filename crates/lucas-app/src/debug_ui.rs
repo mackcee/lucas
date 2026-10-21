@@ -368,7 +368,9 @@ impl DebugApp {
                     } else if pass && save {
                         "Calibration saved locally. No images or training samples saved."
                     } else if pass {
-                        "Ready for this geometry. Saved weights unchanged."
+                        "Test passed. Saved calibration unchanged."
+                    } else if !save {
+                        "Test did not pass. Saved calibration unchanged; recalibrate if tracking seems wrong."
                     } else {
                         "Calibration not saved. Check target visibility, screen/minimap alignment and tracking quality. Numeric diagnostics can help distinguish decision overlap from tracking loss."
                     }
@@ -388,8 +390,8 @@ impl DebugApp {
             }
         }
         if self.runtime_kind == Some(RunKind::Quick) {
-            // A failed or cancelled quick check returns to the tray immediately;
-            // it cannot keep retrying stale weights while coaching is enabled.
+            // Optional tests return their result to the tray. They never save
+            // weights or decide whether the existing calibration remains usable.
             context.send_viewport_cmd(ViewportCommand::Close);
         }
         self.pending = None;
@@ -483,7 +485,10 @@ impl DebugApp {
                         .and_then(|s| s.load_settings())
                         .map_err(|e| e.to_string())?;
                     if self.cameras[self.selected].index != settings.camera_index {
-                        return Err("Quick check must use the calibrated camera; select it or run full calibration.".into());
+                        return Err(
+                            "Test gaze must use the calibrated camera; select it or recalibrate."
+                                .into(),
+                        );
                     }
                     let model = calibration::load(&lucas_store::Store::open().map_err(|e|e.to_string())?, &screen, script.screen().minimap)
                         .map_err(|e|e.to_string())?.ok_or("No passing calibration for this screen/minimap. Run full calibration first.")?;
@@ -742,8 +747,12 @@ impl DebugApp {
                 if self.setup_camera.is_some() && ui.button("Back to setup").clicked() {
                     self.setup_cancelled = true;
                 }
-                ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Quick check before play", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
-                ui.label(if self.runtime_kind.is_some() { "Connect your calibrated camera, then start below. Coaching stays paused until validation passes. Close this window to cancel." } else { "Check camera placement and lighting before recording your glance test." });
+                ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Test gaze (optional)", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
+                ui.label(match self.runtime_kind {
+                    Some(RunKind::Quick) => "Connect your calibrated camera, then start below. Coaching pauses while this window is open. The result never replaces or revokes your saved calibration.",
+                    Some(_) => "Connect your camera, then start below. Only a passing calibration is saved. Coaching pauses while this window is open; close it to cancel.",
+                    None => "Check camera placement and lighting before recording your glance test.",
+                });
                 if let Some(folder) = calibration_diagnostics::directory_from_env() {
                     ui.label(format!("Calibration diagnostics enabled: each full calibration in this session saves gaze/pose numbers to {}. No images or automatic uploads.", folder.display()));
                 }
@@ -779,18 +788,24 @@ impl DebugApp {
                 }
                 ui.add_space(16.0);
                 ui.separator();
-                ui.heading("Calibrate your minimap gaze");
-                ui.label("About 46 seconds. Follow the dots. Partway through, lean, turn and move a little closer or farther as you normally play. Keep following the dots as you move. Four final targets check the fit, including points just outside the minimap. Use your usual glasses and lighting.");
-                ui.horizontal_wrapped(|ui| {
-                    for (label,value) in ["Screen width (mm)","Height (mm)","Assumed distance (mm)"].into_iter().zip(&mut self.measurements) {
-                        ui.horizontal(|ui| { ui.label(label); ui.add(egui::DragValue::new(value).range(100.0..=3000.0)); });
-                    }
-                });
-                ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
-                ui.label("Only weights and validation results are saved. Calibration samples stay in memory; the camera never saves images.");
+                if self.runtime_kind == Some(RunKind::Quick) {
+                    ui.label("Follow the minimap and centre dots. This four-second test checks your saved calibration without replacing it.");
+                } else {
+                    ui.heading("Calibrate your minimap gaze");
+                    ui.label("About 46 seconds. Follow the dots. Partway through, lean, turn and move a little closer or farther as you normally play. Keep following the dots as you move. Four final targets check the fit, including points just outside the minimap. Use your usual glasses and lighting.");
+                    ui.horizontal_wrapped(|ui| {
+                        for (label,value) in ["Screen width (mm)","Height (mm)","Assumed distance (mm)"].into_iter().zip(&mut self.measurements) {
+                            ui.horizontal(|ui| { ui.label(label); ui.add(egui::DragValue::new(value).range(100.0..=3000.0)); });
+                        }
+                    });
+                    ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
+                    ui.label("Only weights and validation results are saved. Calibration samples stay in memory; the camera never saves images.");
+                }
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(fresh && self.pending.is_none() && self.runtime_kind != Some(RunKind::Quick), egui::Button::new("Start calibration")).clicked() { self.arm_test(RunKind::Calibrate); }
-                    if ui.add_enabled(fresh && self.pending.is_none() && self.runtime_kind != Some(RunKind::Calibrate), egui::Button::new("Quick check · 4 seconds")).clicked() { self.arm_test(RunKind::Quick); }
+                    if self.runtime_kind != Some(RunKind::Quick)
+                        && ui.add_enabled(fresh && self.pending.is_none(), egui::Button::new("Start calibration")).clicked() { self.arm_test(RunKind::Calibrate); }
+                    if self.runtime_kind != Some(RunKind::Calibrate)
+                        && ui.add_enabled(fresh && self.pending.is_none(), egui::Button::new("Test gaze · 4 seconds")).clicked() { self.arm_test(RunKind::Quick); }
                 });
                 if let Some(result) = &self.calibration_result { ui.add_space(8.0); ui.label(result); }
                 if self.runtime_kind.is_some() { return; }

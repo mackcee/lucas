@@ -252,12 +252,12 @@ impl Controls {
             SetupStep::Alignment => {
                 ui.label("Alignment needs a running game. In your next game, open the LUCAS tray menu and choose Align minimap…");
                 ui.label("Keep the LUCAS alignment panel focused: arrow keys move the outline, Shift + arrows resize it, Enter saves and Esc cancels. You can also use the panel's buttons. The map scale and side come from League's settings.");
-                ui.label("Then use the tray's quick gaze check. If alignment changed the gaze zone, recalibrate first. LUCAS will not silently recalibrate or coach with a mismatched fit.");
+                ui.label("If alignment changes the gaze zone, recalibrate once for that layout. After that, coaching starts automatically in matching games. Test gaze is optional; LUCAS never coaches with a mismatched fit.");
             }
             SetupStep::Level => {
                 ui.label("Start with the longest ramp delay, then select tighter goals when you are ready. Fade levels keep the final goal while reducing help. There is no automatic promotion.");
                 level_picker(ui, &mut self.setup.as_mut().unwrap().draft.level_index);
-                ui.label("After setup, LUCAS lives in the notification area. Complete a quick check before each game. Use Settings for pulse style, colour and optional sound.");
+                ui.label("After setup, LUCAS lives in the notification area and reuses your calibration automatically in matching games. Test gaze is optional. Recalibrate if you change the screen or minimap alignment. Use Settings for pulse style, colour and optional sound.");
             }
         }
         ui.add_space(20.0);

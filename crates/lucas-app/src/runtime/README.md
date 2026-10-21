@@ -21,37 +21,35 @@ see [Getting started](../../../../README.md#getting-started).
   timer mode bypasses setup for no-camera diagnostics, but an open settings/setup
   window still pauses coaching.
   Switching to gaze invokes setup when required.
-- With completed setup but no passing calibration, launch opens calibration
-  **only if League is not running**. Connect the camera and run full calibration.
-- At every game start, choose **Quick check required (4 seconds)** in the tray.
-  This deliberately uses a player-initiated window rather than stealing focus
-  from League. Do it on the loading screen or before play; until it passes,
-  coaching remains off. It presents one minimap and one centre target. The tray
-  reloads saved calibration before launching the check, and the child must match
-  the tray's weights/camera fingerprint before validating. Changes on disk during
-  the check cannot silently substitute a different coaching snapshot.
-- A failed/cancelled quick check latches **Calibration needed** and offers
-  **Calibrate gaze (full calibration)**.
-  Starting full recalibration also revokes readiness immediately: cancelling or
-  failing cannot resume coaching with old weights. Old weights stay on disk but
-  cannot enable coaching. Complete a new full fit, then the game's quick check.
-  There is no implicit recalibration.
+- **Calibrate once, then play.** A passing saved fit matching the live screen and
+  minimap enables coaching automatically in every game, including after restart
+  or reconnection. There is no required QuickCheck state or per-game approval.
+  Foreground, tracking and normal game eligibility still gate pulses.
+- **Test gaze (optional, 4 seconds)** presents one minimap and one centre target.
+  It never refits or saves. Its weights/camera fingerprint must match the tray's
+  snapshot, but pass, failure, cancellation, stale inputs or a window error only
+  produce feedback: none can revoke a usable fit or authorize a mismatched one.
+  A failed result may suggest recalibration if tracking seems wrong.
+- Calibration, testing and setup release the runtime camera and pause coaching
+  while their window is open. Temporal gaze evidence resets at the handoff so
+  neither dwell nor reminder time bridges the interruption. Closing full
+  calibration/setup re-assesses the actual saved profile, even on cancellation;
+  a previous passing, matching fit remains usable. Only passing full fits save.
+  After completed setup, no calibration/test window opens automatically.
 - Screen origin, resolution, DPI and the aligned minimap rectangle must match
   the saved fit. Use Borderless on the calibration display (currently the main
-  monitor). Changed alignment/scale/flip needs matching calibration again.
-  Startup primary-screen geometry is provisional. Only a geometry rejection at
-  that provisional stage can be retried once against the first live game geometry;
-  a matching saved fit requests **Quick check**, never silently enables coaching.
-  A failed/cancelled check, explicit setup/recalibration, or rejection of live
-  geometry cannot be undone by this automatic retry.
-- **Calibration details** explains a missing/unreadable profile, unsupported model,
-  failed validation, or each changed geometry field with its saved/current values.
-  It also distinguishes cancelled, failed and stale quick checks. These details
-  are local menu text, not a new log or upload. While a calibration child is open,
-  the status says that calibration/checking is running rather than suggesting
-  the passing on-disk profile was lost. Private child exit codes are 0 (pass),
-  3 (cancel), 4 (failed validation/tracking), and 5 (changed inputs); unexpected
-  exits are reported as window errors. None of these relaxes the acceptance gates.
+  monitor). Changed alignment/scale/flip needs a matching calibration. The exact
+  matching rules, 1e-9 minimap tolerance and validation thresholds are unchanged.
+  Startup geometry is provisional; the first live geometry is assessed afresh.
+  Subsequent real geometry changes are reassessed, including returning to the
+  saved layout. Unchanged geometry does not repeatedly reload or toggle readiness.
+- **Calibration needed** gives one plain reason only when no usable saved fit is
+  available or geometry does not match. **Calibration details** holds read/model
+  errors, failed validation, or changed geometry fields with saved/current values.
+  Window/test outcomes are separate hints, not calibration failures. These are
+  local menu text, not a log or upload. Private child exit codes remain 0 (pass),
+  3 (cancel), 4 (failed validation/tracking), and 5 (changed inputs); no result
+  weakens full-calibration acceptance, geometry matching or the 100 ms dwell.
 - **No face / tracking lost** means pulses and eligible gap time are paused.
   Closed eyes, low quality, off-screen estimates and stale samples are unknown,
   never minimap checks. Add front lighting or reconnect the camera; switching
@@ -67,7 +65,7 @@ see [Getting started](../../../../README.md#getting-started).
 - **Next game solo (no pulses)** is one-shot, held in memory until the next game
   starts (not retained across process exit). Its tooltip announces both arming
   and the active solo game. No pulse, sound or alignment preview appears in that
-  game; measurement and quick validation still operate. Timer selection cannot
+  game; measurement and optional gaze testing still operate. Timer selection cannot
   re-enable assistance during a solo game. Its stored `probe_game` flag produces
   the existing card's **Solo probe** label. Arming during play selects the next
   match, not the current one. Gate switches cannot turn a probe into assisted play.
@@ -120,7 +118,7 @@ card on transient connection loss, a session finishes on authoritative GameEnd
 or API loss **plus disappearance of the game window**. Reconnection before
 finalization keeps the same session/death deduplication. If the window disappears
 and the session finishes, returning to the same active match starts a new session
-and requires another quick check, while retaining death deduplication.
+using the matching saved calibration automatically, while retaining death deduplication.
 The explicit **Use Live Client gate** tray switch selects window-only fallback;
 there is no silent permissive fallback.
 Window-only cannot know loading, death, map/mode or game-clock pauses: pause it
@@ -147,5 +145,8 @@ children close on tray exit.
 Portable replay coverage is in `tests/runtime.rs`: synthetic gaze plus scripted
 API states, checks and jitter bounds, no-face/off-screen/closed-eye spans,
 blind/seen/unknown deaths, SQLite round-trip, game-start calibration routing and
-camera-source open/drop counts. Synthetic fixtures are not real-webcam accuracy
+camera-source open/drop counts. `tests/calibration_readiness.rs` also executes
+setup persistence → multiple games/restart → active coaching without a test,
+non-revoking optional outcomes, and genuine mismatch/recovery through the same
+loader/completion path used by the desktop. Synthetic fixtures are not real-webcam accuracy
 or native Windows UI acceptance evidence.

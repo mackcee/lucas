@@ -143,17 +143,20 @@ native overlay correctness.
 
 - Use **Align minimap…** once eligible; keep the LUCAS panel focused to nudge/resize
   and save while watching the border over League.
-  If this changes the calibration zone, explicitly recalibrate; then complete
-  **Quick check required (4 seconds)** from the tray before continuing play.
-- If the tray says **Calibration needed**, open **Calibration details** for the
-  reason. Geometry differences list saved/current numbers; a cancelled, failed or
-  stale quick check is identified separately. A passing full calibration only
-  advances to **Quick check**, not active coaching. While its window is open the
-  tray should say **Calibration / quick check running — coaching paused**.
-  If only provisional startup geometry rejected the profile, the first matching
-  live game geometry may recover to Quick check once. Cancelling a full fit or
-  failing a quick check must still require full calibration; changing geometry
-  back must not silently re-enable coaching.
+  If this changes the calibration zone, recalibrate once for the new layout.
+  With a passing matching calibration, coaching starts automatically when play
+  is eligible and gaze is usable. There must be no per-game quick-check prompt.
+- If the tray says **Calibration needed**, its plain reason must describe a
+  missing/unusable saved profile or a genuine screen/minimap mismatch. Open
+  **Calibration details** for read/model errors or saved/current geometry numbers.
+  A provisional startup mismatch must recover automatically at matching live
+  geometry; unchanged inputs must not cycle calibration states.
+- Optionally choose **Test gaze** once. While its window is open coaching pauses.
+  Cancel it, then try a failing result: the valid calibration must remain usable,
+  no calibration file may be rewritten, and coaching must resume without another
+  calibration/check. Failure may show a hint suggesting recalibration. A passing
+  test must not override a real geometry mismatch. Recalibration/setup cancellation
+  likewise uses a still-valid saved fit rather than revoking it by UI outcome.
 - Check pulses after eligible gaps, no pulse during a sustained map look, and
   suppression when dead, alt-tabbed, tracking lost or outside supported play.
   Delays have jitter and a density cap, so they are not exact metronome intervals.
@@ -164,8 +167,9 @@ native overlay correctness.
 
 ### Game 2 — the selected level
 
-- Confirm **8 s** survived restart if you restarted. Do the game's quick check.
-  This game should use the newly selected level; the end card should agree.
+- Confirm **8 s** survived restart if you restarted. Coaching should start
+  automatically with the same calibration, without clicking Test gaze or
+  recalibrating. This game should use the newly selected level; the end card should agree.
 - Try a different pulse style/colour and optional sound through Settings, then
   restore sound off. Saving appearance must not change the game goal. Closing
   Settings resumes coaching, without opening another calibration automatically.
@@ -176,7 +180,7 @@ native overlay correctness.
 ### Game 3 — solo
 
 - At game start, the tray tooltip should say **Solo game — no pulses or sound;
-  summary after play**. Do the usual quick check. No minimap outline, reminder,
+  summary after play**. No gaze test is required. No minimap outline, reminder,
   sound or live score should appear, even over long gaps. **Align minimap…** is
   unavailable during solo play. Timer selection must not bypass this suppression.
 - At game end, the card should say **Solo probe**, with zero pulses but measured
@@ -261,7 +265,7 @@ Remove-Item Env:LUCAS_GAZE_SOURCE -ErrorAction SilentlyContinue
 ```
 
 `LUCAS_GAZE_SOURCE=unigaze` instead requires UniGaze and errors if missing. Keep
-the same selection for calibration, quick check, recording and play. Follow the
+the same selection for calibration, optional Test gaze, recording and play. Follow the
 [calibration guide](../crates/lucas-app/README.md#in-app-calibration) for saved-profile
 compatibility and when to repeat calibration.
 
@@ -438,7 +442,7 @@ and repeat, identifying the new position in the note. Run `cargo xtask eval
 calibration recordings, physical monitor dimensions and scoring rules. Synthetic
 tests do not establish real-webcam G2 acceptance.
 
-For in-app calibration and **Quick check**, follow the
+For in-app calibration and optional **Test gaze**, follow the
 [calibration guide](../crates/lucas-app/README.md#in-app-calibration), including
 physical monitor measurements, saved alignment and when to recalibrate.
 

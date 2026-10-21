@@ -190,7 +190,7 @@ for settings discovery, fallback and installation overrides, and
 for saving corrections. A missing profile uses the geometry seed; an invalid
 alignment file blocks calibration. The corrected rectangle determines target
 placement, labels and saved-model geometry comparisons. Changing that rectangle
-requires full calibration again before Quick check can reuse a model.
+requires a passing full calibration again before that model can be used.
 
 Each two-second calibration target is visible through a 500 ms settling phase
 and the following hold. Collection requires at least 200 ms of hold time and
@@ -205,27 +205,31 @@ Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
 shows mean angular error, sensitivity/FPR and pass/fail. In standalone or tray
 calibration, only passing fits save weights/geometry/validation aggregates through
 `lucas-store` and update the saved camera selection; failures retain the previous
-saved profile on disk. Tray readiness follows the [runtime failure contract](src/runtime/README.md#before-play),
-not just the presence of that file. First-run setup instead uses the draft and
+saved profile on disk. The tray automatically uses a passing fit matching the
+current geometry; optional testing never revokes it. See the
+[runtime contract](src/runtime/README.md#before-play). First-run setup instead uses the draft and
 Finish contract in the same runtime guide.
 Full calibration samples are discarded by default. For the separate opt-in
 export, its contents and privacy controls, see the
 [one-run diagnostic instructions](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).
 The separate glance recorder still requires explicit opt-in for each recording.
 
-**Quick check** uses one minimap and one centre target in four seconds. It neither
-refits nor saves and must use the saved calibrated camera. Repeat full calibration
-after a failed quick check. For integrations:
+**Test gaze** is optional: one minimap and one centre target in four seconds.
+It neither refits nor saves and must use the saved calibrated camera. A failed or
+cancelled test never revokes a passing matching fit; its feedback can suggest
+recalibration if tracking seems wrong. For integrations:
 
 1. Construct `CalibrationScript::new` with the current settings and loaded
    `AlignmentStore` as above. Pass its `screen().minimap` to
    `calibration::load(store, current_screen, current_minimap)`, which rejects
    changed desktop origin/resolution/DPI/map geometry or unsupported model bytes.
-2. Present `CalibrationScript::quick(&model)` using the same fullscreen target
-   path; collect `Observation`s by displayed target and acquisition time.
-3. Call `quick_revalidate(&model, observations)` and require
-   `validation.passes(model.target_false_positive_rate())` before enabling gaze.
-4. Feed the camera stream to `lucas_gaze::decision::CalibratedDetector`.
+2. Use a passing matching model with `lucas_gaze::decision::CalibratedDetector`
+   automatically, subject to ordinary tracking/foreground/game eligibility.
+3. Only when the user requests a test, present `CalibrationScript::quick(&model)`
+   and collect `Observation`s by displayed target and acquisition time.
+4. `quick_revalidate(&model, observations)` and
+   `validation.passes(model.target_false_positive_rate())` determine the optional
+   test result, not coaching permission. Do not replace or revoke the saved fit.
 
 The [runtime guide](src/runtime/README.md#before-play) owns game-start routing,
 calibration snapshot matching and failure handling for the tray integration.
