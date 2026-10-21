@@ -1,6 +1,9 @@
 //! Calibration schedule, in-memory observations and the M5.2 revalidation seam.
 //! No camera frames or calibration observations are persisted by this module.
 //! Explicit numeric diagnostic export is isolated in calibration_diagnostics.
+mod readiness;
+pub use readiness::{CalibrationIssue, assess};
+
 use crate::{
     script::{Phase, Step, Target, TargetKind},
     timer::alignment_store::{AlignmentStore, Key},
@@ -329,25 +332,25 @@ pub fn load(
     screen: &ScreenGeometry,
     minimap: [f64; 4],
 ) -> crate::trace::Result<Option<CalibrationModel>> {
-    let Some(saved) = store.load_calibration()? else {
-        return Ok(None);
-    };
-    let model = CalibrationModel::from_bytes(&saved.model)?;
-    if &saved.screen != screen
-        || model.screen().resolution != [screen.width, screen.height]
-        || model
-            .screen()
-            .minimap
-            .iter()
-            .zip(minimap)
-            .any(|(a, b)| !b.is_finite() || (a - b).abs() > 1e-9)
-        || !model
-            .validation()
-            .passes(model.target_false_positive_rate())
-    {
-        return Ok(None);
+    match load_explained(store, Some((screen, minimap))) {
+        Ok(model) => Ok(Some(model)),
+        Err(
+            CalibrationIssue::MissingProfile
+            | CalibrationIssue::GeometryChanged(_)
+            | CalibrationIssue::ValidationFailed(_),
+        ) => Ok(None),
+        Err(error) => Err(error.into()),
     }
-    Ok(Some(model))
+}
+
+pub fn load_explained(
+    store: &Store,
+    geometry: Option<(&ScreenGeometry, [f64; 4])>,
+) -> Result<CalibrationModel, CalibrationIssue> {
+    let saved = store
+        .load_calibration()
+        .map_err(|e| CalibrationIssue::ReadError(e.to_string()))?;
+    assess(saved, geometry)
 }
 
 #[cfg(test)]

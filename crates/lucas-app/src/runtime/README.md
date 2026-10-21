@@ -30,7 +30,8 @@ see [Getting started](../../../../README.md#getting-started).
   reloads saved calibration before launching the check, and the child must match
   the tray's weights/camera fingerprint before validating. Changes on disk during
   the check cannot silently substitute a different coaching snapshot.
-- A failed/cancelled quick check latches **Calibration needed / recalibrate**.
+- A failed/cancelled quick check latches **Calibration needed** and offers
+  **Calibrate gaze (full calibration)**.
   Starting full recalibration also revokes readiness immediately: cancelling or
   failing cannot resume coaching with old weights. Old weights stay on disk but
   cannot enable coaching. Complete a new full fit, then the game's quick check.
@@ -38,6 +39,19 @@ see [Getting started](../../../../README.md#getting-started).
 - Screen origin, resolution, DPI and the aligned minimap rectangle must match
   the saved fit. Use Borderless on the calibration display (currently the main
   monitor). Changed alignment/scale/flip needs matching calibration again.
+  Startup primary-screen geometry is provisional. Only a geometry rejection at
+  that provisional stage can be retried once against the first live game geometry;
+  a matching saved fit requests **Quick check**, never silently enables coaching.
+  A failed/cancelled check, explicit setup/recalibration, or rejection of live
+  geometry cannot be undone by this automatic retry.
+- **Calibration details** explains a missing/unreadable profile, unsupported model,
+  failed validation, or each changed geometry field with its saved/current values.
+  It also distinguishes cancelled, failed and stale quick checks. These details
+  are local menu text, not a new log or upload. While a calibration child is open,
+  the status says that calibration/checking is running rather than suggesting
+  the passing on-disk profile was lost. Private child exit codes are 0 (pass),
+  3 (cancel), 4 (failed validation/tracking), and 5 (changed inputs); unexpected
+  exits are reported as window errors. None of these relaxes the acceptance gates.
 - **No face / tracking lost** means pulses and eligible gap time are paused.
   Closed eyes, low quality, off-screen estimates and stale samples are unknown,
   never minimap checks. Add front lighting or reconnect the camera; switching

@@ -1,5 +1,6 @@
 //! Portable gaze orchestration. Only numeric samples enter this module; no I/O,
 //! camera frames, Win32 handles or wall clocks are owned by the core loop.
+pub mod calibration_status;
 pub mod camera;
 mod clock;
 #[cfg(windows)]

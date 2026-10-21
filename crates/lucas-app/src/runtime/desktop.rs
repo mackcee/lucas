@@ -1,7 +1,8 @@
 //! Windows process/UI boundary. Calibration is offered, never forced over a
 //! live game. Subprocesses give eframe its own main thread and camera ownership.
+use super::calibration_status::{CalibrationOutcome, CalibrationStatus, Geometry, GeometrySource};
 use super::{CalibrationState, Inputs, Runtime, Tick, native_camera::CameraWorker};
-use crate::calibration;
+use crate::calibration::{self, CalibrationIssue};
 use lucas_geometry::Rect;
 use lucas_store::{ScreenGeometry, Store};
 use std::{
@@ -24,7 +25,7 @@ pub struct Desktop {
     controls: Option<(Child, bool)>,
     pub controls_notice: Option<String>,
     delete_requested: bool,
-    geometry: Option<(ScreenGeometry, [f64; 4])>,
+    calibration_status: CalibrationStatus,
     generation: u64,
     origin: Instant,
     models: PathBuf,
@@ -35,11 +36,8 @@ impl Desktop {
         let store = Store::open()?;
         let mut runtime = Runtime::new(store.load_settings()?)?;
         // Provisional only: actual game geometry must still match before use.
-        let model = store
-            .load_calibration()
-            .ok()
-            .flatten()
-            .and_then(|c| lucas_gaze::calibration::CalibrationModel::from_bytes(&c.model).ok());
+        let mut calibration_status = CalibrationStatus::default();
+        let model = calibration_status.loaded(calibration::load_explained(&store, None));
         runtime.install_calibration(model)?;
         Ok(Self {
             runtime,
@@ -49,7 +47,7 @@ impl Desktop {
             controls: None,
             controls_notice: None,
             delete_requested: false,
-            geometry: None,
+            calibration_status,
             generation: 0,
             origin,
             models: std::env::current_exe()?
@@ -58,6 +56,12 @@ impl Desktop {
                 .join("models"),
             pending: Vec::new(),
         })
+    }
+    pub fn calibration_issue(&self) -> Option<&CalibrationIssue> {
+        self.calibration_status.issue()
+    }
+    pub fn calibration_message(&self) -> String {
+        self.calibration_status.tray_message(self.calibrating())
     }
     pub fn editing(&self) -> bool {
         self.controls.is_some()
@@ -72,6 +76,8 @@ impl Desktop {
             // Explicit setup includes recalibration; stale readiness must not
             // return when setup is cancelled or the camera choice changes.
             self.runtime.install_calibration(None)?;
+            self.calibration_status
+                .block(CalibrationIssue::SetupRunning);
         }
         let child = Command::new(std::env::current_exe()?)
             .arg(if setup {
@@ -79,7 +85,13 @@ impl Desktop {
             } else {
                 "--runtime-settings"
             })
-            .spawn()?;
+            .spawn()
+            .inspect_err(|error| {
+                if setup {
+                    self.calibration_status
+                        .block(CalibrationIssue::WindowError(error.to_string()));
+                }
+            })?;
         self.controls = Some((child, setup));
         Ok(())
     }
@@ -101,34 +113,44 @@ impl Desktop {
         }
         Ok(())
     }
-    pub fn geometry(&mut self, screen: ScreenGeometry, rect: Rect) -> Result<()> {
+    pub fn geometry(
+        &mut self,
+        screen: ScreenGeometry,
+        rect: Rect,
+        source: GeometrySource,
+    ) -> Result<()> {
         let map = [
             (rect.left() - screen.left as f64) / screen.width as f64,
             (rect.top() - screen.top as f64) / screen.height as f64,
             (rect.right() - screen.left as f64) / screen.width as f64,
             (rect.bottom() - screen.top as f64) / screen.height as f64,
         ];
-        let geometry = (screen, map);
-        if self.geometry.as_ref() != Some(&geometry) {
+        let update = self.calibration_status.update_geometry(
+            Geometry {
+                screen,
+                minimap: map,
+            },
+            source,
+            self.runtime.calibration(),
+            self.calibrating(),
+        );
+        if update.changed {
             self.generation += 1;
-            self.geometry = Some(geometry);
-            if self.runtime.calibration() != CalibrationState::Needed && !self.calibrating() {
-                self.reload()?;
-            }
+        }
+        if update.reload {
+            self.reload()?;
         }
         Ok(())
     }
     fn reload(&mut self) -> Result<()> {
-        self.runtime.settings.camera_index = Store::open()?.load_settings()?.camera_index;
-        let model = if let Some((screen, map)) = &self.geometry {
-            calibration::load(&Store::open()?, screen, *map).unwrap_or(None)
-        } else {
-            Store::open()?
-                .load_calibration()
-                .ok()
-                .flatten()
-                .and_then(|c| lucas_gaze::calibration::CalibrationModel::from_bytes(&c.model).ok())
-        };
+        let store = Store::open()?;
+        self.runtime.settings.camera_index = store.load_settings()?.camera_index;
+        let geometry = self
+            .calibration_status
+            .geometry()
+            .map(|g| (&g.screen, g.minimap));
+        let result = calibration::load_explained(&store, geometry);
+        let model = self.calibration_status.loaded(result);
         self.runtime.install_calibration(model)?;
         Ok(())
     }
@@ -141,6 +163,10 @@ impl Desktop {
             self.reload()?;
         }
         let quick = self.runtime.begin_calibration()?;
+        if !quick {
+            self.calibration_status
+                .block(CalibrationIssue::FullCalibrationRunning);
+        }
         let mut command = Command::new(std::env::current_exe()?);
         if quick {
             let model = self
@@ -157,7 +183,10 @@ impl Desktop {
         } else {
             command.arg("--runtime-calibrate");
         }
-        let child = command.spawn()?;
+        let child = command.spawn().inspect_err(|error| {
+            self.calibration_status
+                .block(CalibrationIssue::WindowError(error.to_string()));
+        })?;
         self.calibration = Some(CalibrationTask {
             child,
             quick,
@@ -187,6 +216,15 @@ impl Desktop {
                     .into(),
                 );
             } else if !self.delete_requested {
+                if setup {
+                    self.calibration_status.block(if status.code() == Some(3) {
+                        CalibrationIssue::SetupCancelled
+                    } else {
+                        CalibrationIssue::WindowError(format!(
+                            "Setup exited with {status}; reopen setup."
+                        ))
+                    });
+                }
                 self.controls_notice = Some(
                     if status.code() == Some(3) {
                         "Settings closed; reopen setup from the tray if needed"
@@ -201,11 +239,22 @@ impl Desktop {
             && let Some(status) = task.child.try_wait()?
         {
             let task = self.calibration.take().unwrap();
+            let outcome = CalibrationOutcome::from_code(status.code());
             if task.quick {
+                let same_generation = task.generation == self.generation;
                 self.runtime
-                    .revalidated(status.success() && task.generation == self.generation)?;
+                    .revalidated(status.success() && same_generation)?;
+                self.calibration_status
+                    .quick_finished(outcome, same_generation);
             } else if status.success() {
                 self.reload()?;
+            } else {
+                self.calibration_status
+                    .block(outcome.and_then(|o| o.issue(false)).unwrap_or_else(|| {
+                        CalibrationIssue::WindowError(format!(
+                            "Calibration exited with {status}; retry full calibration."
+                        ))
+                    }));
             }
         }
         inputs.paused |= self.calibrating() || self.editing() || self.delete_requested;

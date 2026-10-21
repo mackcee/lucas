@@ -3,6 +3,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, RichText, Stroke, Vec2, 
 use lucas_app::{
     calibration::{self, CalibrationScript},
     calibration_diagnostics,
+    runtime::calibration_status::CalibrationOutcome,
     script::{Phase, Script, Step, validate_duration},
     settings::MinimapSelection,
     timer::alignment_store::{self, AlignmentStore},
@@ -26,7 +27,10 @@ fn trace_directory() -> Result<PathBuf, String> {
 pub fn run(seconds: u64, models: PathBuf) -> Result<(), String> {
     run_impl(seconds, models, None, None).map(|_| ())
 }
-pub fn run_calibration(models: PathBuf, quick_snapshot: Option<String>) -> Result<bool, String> {
+pub fn run_calibration(
+    models: PathBuf,
+    quick_snapshot: Option<String>,
+) -> Result<CalibrationOutcome, String> {
     run_impl(
         600,
         models,
@@ -43,9 +47,11 @@ fn run_impl(
     models: PathBuf,
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
-) -> Result<bool, String> {
-    let passed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let result = passed.clone();
+) -> Result<CalibrationOutcome, String> {
+    let outcome = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+        CalibrationOutcome::Cancelled as u8,
+    ));
+    let result = outcome.clone();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([820.0, 780.0])
@@ -86,7 +92,7 @@ fn run_impl(
                 calibration_result: None,
                 runtime_kind,
                 quick_snapshot,
-                runtime_passed: result,
+                runtime_outcome: result,
                 setup_camera: None,
                 setup_profile: None,
                 setup_cancelled: false,
@@ -96,7 +102,10 @@ fn run_impl(
         }),
     )
     .map_err(|e| e.to_string())?;
-    Ok(passed.load(std::sync::atomic::Ordering::Acquire))
+    Ok(CalibrationOutcome::from_code(Some(
+        outcome.load(std::sync::atomic::Ordering::Acquire) as i32
+    ))
+    .unwrap_or(CalibrationOutcome::Failed))
 }
 struct Camera {
     index: u32,
@@ -176,7 +185,7 @@ pub(crate) struct DebugApp {
     calibration_result: Option<String>,
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
-    runtime_passed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    runtime_outcome: std::sync::Arc<std::sync::atomic::AtomicU8>,
     setup_camera: Option<u32>,
     pub(crate) setup_profile: Option<lucas_store::Calibration>,
     pub(crate) setup_cancelled: bool,
@@ -212,7 +221,9 @@ impl DebugApp {
             calibration_result: None,
             runtime_kind: Some(RunKind::Calibrate),
             quick_snapshot: None,
-            runtime_passed: Default::default(),
+            runtime_outcome: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                CalibrationOutcome::Cancelled as u8,
+            )),
             setup_camera: Some(camera),
             setup_profile: None,
             setup_cancelled: false,
@@ -226,8 +237,13 @@ impl DebugApp {
         Ok(app)
     }
     pub(crate) fn setup_passed(&self) -> bool {
-        self.runtime_passed
+        self.runtime_outcome
             .load(std::sync::atomic::Ordering::Acquire)
+            == CalibrationOutcome::Passed as u8
+    }
+    fn set_outcome(&self, outcome: CalibrationOutcome) {
+        self.runtime_outcome
+            .store(outcome as u8, std::sync::atomic::Ordering::Release);
     }
     fn refresh_cameras(&mut self) {
         match nokhwa::query(nokhwa::utils::ApiBackend::MediaFoundation) {
@@ -241,6 +257,11 @@ impl DebugApp {
         }
     }
     fn finish_test(&mut self, context: &egui::Context, reason: EndReason) {
+        self.set_outcome(if reason == EndReason::Completed {
+            CalibrationOutcome::Failed
+        } else {
+            CalibrationOutcome::Cancelled
+        });
         let (observations, diagnostic_frames) = if let Some(worker) = &self.worker {
             let mut state = worker.shared.lock().unwrap();
             state.finish(reason);
@@ -326,8 +347,7 @@ impl DebugApp {
                     }
                 }
                 if pass && self.runtime_kind.is_some() {
-                    self.runtime_passed
-                        .store(true, std::sync::atomic::Ordering::Release);
+                    self.set_outcome(CalibrationOutcome::Passed);
                     if self.setup_camera.is_none() {
                         context.send_viewport_cmd(ViewportCommand::Close);
                     }
@@ -380,6 +400,7 @@ impl DebugApp {
         context.set_cursor_icon(egui::CursorIcon::Default);
     }
     fn arm_test(&mut self, requested: RunKind) {
+        self.set_outcome(CalibrationOutcome::Cancelled);
         self.requested = requested;
         self.calibration_result = None;
         self.error = None;
@@ -408,6 +429,7 @@ impl DebugApp {
         if pending.started.elapsed() > Duration::from_secs(5) {
             self.error = Some("Could not enter fullscreen on the main monitor. Move LUCAS to the main monitor and try again.".into());
             self.finish_test(context, EndReason::Cancelled);
+            self.set_outcome(CalibrationOutcome::Failed);
             return;
         }
         let scale = context.pixels_per_point();
@@ -471,7 +493,10 @@ impl DebugApp {
                             self.cameras[self.selected].index,
                             expected,
                         )
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| {
+                            self.set_outcome(CalibrationOutcome::Changed);
+                            e.to_string()
+                        })?;
                     }
                     Schedule::Quick(CalibrationScript::quick(&model), Box::new(model))
                 } else {
@@ -532,8 +557,18 @@ impl DebugApp {
                 self.pending = None;
             }
             Err(error) => {
+                let outcome = if self
+                    .runtime_outcome
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    == CalibrationOutcome::Changed as u8
+                {
+                    CalibrationOutcome::Changed
+                } else {
+                    CalibrationOutcome::Failed
+                };
                 self.error = Some(error);
                 self.finish_test(context, EndReason::Cancelled);
+                self.set_outcome(outcome);
             }
         }
     }
@@ -544,6 +579,7 @@ impl DebugApp {
         if self.window.fullscreen().is_none() || [actual.width, actual.height] != expected {
             self.error = Some("Display geometry changed. Start a new test or calibration.".into());
             self.finish_test(context, EndReason::Cancelled);
+            self.set_outcome(CalibrationOutcome::Changed);
             return;
         }
         let test = self.test.as_ref().unwrap();
@@ -566,6 +602,9 @@ impl DebugApp {
         };
         if cancelled || failed {
             self.finish_test(context, EndReason::Cancelled);
+            if failed && !cancelled {
+                self.set_outcome(CalibrationOutcome::Failed);
+            }
             return;
         }
         let phase = if focused {
@@ -807,11 +846,17 @@ impl eframe::App for DebugApp {
     fn ui(&mut self, root: &mut egui::Ui, _: &mut eframe::Frame) {
         let context = &root.ctx().clone();
         context.request_repaint_after(Duration::from_millis(33));
-        if context.input(|i| i.viewport().close_requested())
-            && let Some(worker) = &self.worker
-        {
-            worker.shared.lock().unwrap().finish(EndReason::Cancelled);
-            worker.stop();
+        if context.input(|i| i.viewport().close_requested()) {
+            if self.test.is_some() || self.pending.is_some() {
+                self.finish_test(context, EndReason::Cancelled);
+            }
+            if let Some(worker) = &self.worker {
+                worker.shared.lock().unwrap().finish(EndReason::Cancelled);
+                worker.stop();
+            }
+            // Do not classify our intentional worker stop as tracking failure,
+            // or replace an already-completed failed result with cancellation.
+            return;
         }
         if self.pending.is_some() && context.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.finish_test(context, EndReason::Cancelled);

@@ -145,6 +145,15 @@ native overlay correctness.
   and save while watching the border over League.
   If this changes the calibration zone, explicitly recalibrate; then complete
   **Quick check required (4 seconds)** from the tray before continuing play.
+- If the tray says **Calibration needed**, open **Calibration details** for the
+  reason. Geometry differences list saved/current numbers; a cancelled, failed or
+  stale quick check is identified separately. A passing full calibration only
+  advances to **Quick check**, not active coaching. While its window is open the
+  tray should say **Calibration / quick check running — coaching paused**.
+  If only provisional startup geometry rejected the profile, the first matching
+  live game geometry may recover to Quick check once. Cancelling a full fit or
+  failing a quick check must still require full calibration; changing geometry
+  back must not silently re-enable coaching.
 - Check pulses after eligible gaps, no pulse during a sustained map look, and
   suppression when dead, alt-tabbed, tracking lost or outside supported play.
   Delays have jitter and a density cap, so they are not exact metronome intervals.

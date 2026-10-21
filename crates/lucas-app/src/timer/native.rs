@@ -89,6 +89,9 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let mut last_rect = None;
 
     let status_item = MenuItem::new("Waiting for a game", false, None);
+    let calibration_details = Submenu::new("Calibration details", false);
+    let mut reason_items: Vec<MenuItem> = Vec::new();
+    let mut last_reason = Vec::new();
     let notice_item = MenuItem::new(
         "Gaze mode: complete a quick check from the tray each game",
         false,
@@ -129,6 +132,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let quit = MenuItem::new("Quit", true, None);
     let menu = Menu::with_items(&[
         &status_item,
+        &calibration_details,
         &notice_item,
         &PredefinedMenuItem::separator(),
         &pause,
@@ -165,7 +169,11 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         )?;
         let settings = read_hud(&locator).unwrap_or_default();
         let rect = minimap_rect(client, settings, store.get(Key::new(client, settings)))?;
-        gaze.geometry(screen, rect)?;
+        gaze.geometry(
+            screen,
+            rect,
+            crate::runtime::calibration_status::GeometrySource::Provisional,
+        )?;
     }
     // Never steal game focus: quick checks and mid-game recalibration are tray actions.
     if setup_pending {
@@ -505,6 +513,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                         scale_factor: dpi as f64 / 96.0,
                     },
                     rect,
+                    crate::runtime::calibration_status::GeometrySource::LiveGame,
                 )?;
             }
         }
@@ -523,7 +532,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
             break;
         }
         calibrate.set_text(match gaze.runtime.calibration() {
-            crate::runtime::CalibrationState::Needed => "Calibration needed / recalibrate...",
+            crate::runtime::CalibrationState::Needed => "Calibrate gaze (full calibration)...",
             crate::runtime::CalibrationState::QuickCheck => "Quick check required (4 seconds)...",
             crate::runtime::CalibrationState::Ready => "Recalibrate gaze...",
         });
@@ -531,6 +540,22 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         setup_pending = !timer_mode && crate::preferences::needs_setup(gaze.runtime.settings());
         if let Some(notice) = gaze.controls_notice.take() {
             notice_item.set_text(notice);
+        }
+        let reason = gaze
+            .calibration_issue()
+            .map(|r| r.details())
+            .unwrap_or_default();
+        if reason != last_reason {
+            for item in reason_items.drain(..) {
+                calibration_details.remove(&item)?;
+            }
+            for row in &reason {
+                let item = MenuItem::new(row, false, None);
+                calibration_details.append(&item)?;
+                reason_items.push(item);
+            }
+            calibration_details.set_enabled(!reason.is_empty());
+            last_reason = reason;
         }
         for (index, item) in &level_items {
             item.set_checked(*index == gaze.runtime.settings().level_index);
@@ -610,10 +635,13 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 }
             }
         }
+        let calibration_message = gaze.calibration_message();
         let text = if gaze.runtime.solo_active() {
             "Solo game — no pulses or sound; summary after play"
         } else if gaze.editing() || setup_pending {
             "Setup / settings — coaching paused"
+        } else if gaze.calibrating() {
+            &calibration_message
         } else if alignment.is_some() {
             "Paused — use LUCAS alignment panel (Save / Cancel)"
         } else if timer.paused() {
@@ -625,9 +653,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         } else if !timer_mode {
             match gaze_tick.status {
                 crate::runtime::Status::Waiting => "Waiting for a game",
-                crate::runtime::Status::CalibrationNeeded => {
-                    "Calibration needed — choose Calibrate gaze"
-                }
+                crate::runtime::Status::CalibrationNeeded => &calibration_message,
                 crate::runtime::Status::QuickCheckNeeded => {
                     "Quick check needed — open it from the tray before play"
                 }

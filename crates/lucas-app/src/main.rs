@@ -153,11 +153,13 @@ fn run() -> Result<(), String> {
     #[cfg(windows)]
     {
         if let Some(quick_snapshot) = runtime_calibration {
-            return if debug_ui::run_calibration(models, quick_snapshot)? {
-                Ok(())
-            } else {
-                Err("Calibration cancelled or failed; coaching remains paused".into())
-            };
+            let outcome = debug_ui::run_calibration(models, quick_snapshot)?;
+            // The UI and camera worker have already shut down. Preserve the
+            // typed subprocess result instead of merging cancellation/failure.
+            if outcome != lucas_app::runtime::calibration_status::CalibrationOutcome::Passed {
+                std::process::exit(outcome as i32);
+            }
+            return Ok(());
         }
         if check_runtime {
             let verified =
