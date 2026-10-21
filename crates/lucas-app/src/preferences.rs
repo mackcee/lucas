@@ -68,10 +68,10 @@ pub fn calibration_picker(
     use eframe::egui::{ComboBox, DragValue};
     use lucas_store::ScreenSize;
     let label = |size| match size {
-        ScreenSize::Inches24 => "24″",
-        ScreenSize::Inches27 => "27″",
-        ScreenSize::Inches32 => "32″",
-        ScreenSize::Inches34 => "34″",
+        ScreenSize::Inches24 => "24 in",
+        ScreenSize::Inches27 => "27 in",
+        ScreenSize::Inches32 => "32 in",
+        ScreenSize::Inches34 => "34 in",
         ScreenSize::Custom => "Custom",
     };
     ComboBox::from_label("Screen size (diagonal)")

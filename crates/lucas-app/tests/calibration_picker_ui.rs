@@ -52,12 +52,15 @@ fn picker_selects_presets_reveals_custom_and_reopens_saved_choice() {
     let context = egui::Context::default();
     let mut preferences = CalibrationPreferences::default();
     render(&context, &mut preferences, vec![]);
-    let mut current = "24″";
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_in(dir.path()).unwrap();
+    let mut stale_tray_settings = store.load_settings().unwrap();
+    let mut current = "24 in";
     for (label, size) in [
-        ("27″", ScreenSize::Inches27),
-        ("32″", ScreenSize::Inches32),
-        ("34″", ScreenSize::Inches34),
-        ("24″", ScreenSize::Inches24),
+        ("27 in", ScreenSize::Inches27),
+        ("32 in", ScreenSize::Inches32),
+        ("34 in", ScreenSize::Inches34),
+        ("24 in", ScreenSize::Inches24),
         ("Custom", ScreenSize::Custom),
     ] {
         click(&context, &mut preferences, current);
@@ -82,11 +85,26 @@ fn picker_selects_presets_reveals_custom_and_reopens_saved_choice() {
                 .is_some()
             );
         }
+        if size == ScreenSize::Inches27 {
+            store.save_calibration_preferences(preferences).unwrap();
+            // A running tray still holds the defaults loaded before calibration.
+            stale_tray_settings.level_index = 3;
+            stale_tray_settings.live_client_gate = false;
+            store.save_settings(&stale_tray_settings).unwrap();
+            let mut reopened = Store::open_in(dir.path())
+                .unwrap()
+                .load_settings()
+                .unwrap()
+                .calibration;
+            assert_eq!(reopened, preferences);
+            let output = render(&egui::Context::default(), &mut reopened, vec![]);
+            assert!(position(&output, "27 in").is_some());
+            export_settings(dir.path(), "reopened-27-inch");
+        }
         current = label;
     }
     preferences.custom_size_mm = [597, 336];
     preferences.viewing_distance_mm = 720;
-    let dir = tempfile::tempdir().unwrap();
     Store::open_in(dir.path())
         .unwrap()
         .save_calibration_preferences(preferences)
@@ -100,4 +118,33 @@ fn picker_selects_presets_reveals_custom_and_reopens_saved_choice() {
     let output = render(&egui::Context::default(), &mut reopened, vec![]);
     assert!(position(&output, "Custom").is_some());
     assert!(position(&output, "Screen width (mm)").is_some());
+    export_settings(dir.path(), "reopened-custom");
+}
+
+#[test]
+fn picker_labels_have_renderable_glyphs() {
+    let context = egui::Context::default();
+    let mut preferences = CalibrationPreferences::default();
+    let output = render(&context, &mut preferences, vec![]);
+    for shape in &output.shapes {
+        if let egui::epaint::Shape::Text(text) = &shape.shape {
+            for section in &text.galley.job.sections {
+                let label = &text.galley.job.text
+                    [section.byte_range.start.0..section.byte_range.end.0];
+                assert!(
+                    context.fonts_mut(|fonts| fonts.has_glyphs(&section.format.font_id, label)),
+                    "picker text renders a missing-glyph box: {label:?}"
+                );
+            }
+        }
+    }
+}
+
+// Export the actual persisted settings contract for optional native rendering.
+fn export_settings(source: &std::path::Path, name: &str) {
+    if let Some(root) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
+        let destination = std::path::PathBuf::from(root).join(name);
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::copy(source.join("settings.toml"), destination.join("settings.toml")).unwrap();
+    }
 }
