@@ -143,8 +143,20 @@ native overlay correctness.
 
 - Use **Align minimap…** once eligible; keep the LUCAS panel focused to nudge/resize
   and save while watching the border over League.
-  If this changes the calibration zone, explicitly recalibrate; then complete
-  **Quick check required (4 seconds)** from the tray before continuing play.
+  If this changes the calibration zone, recalibrate once for the new layout.
+  With a passing matching calibration, coaching starts automatically when play
+  is eligible and gaze is usable. There must be no per-game quick-check prompt.
+- If the tray says **Calibration needed**, its plain reason must describe a
+  missing/unusable saved profile or a genuine screen/minimap mismatch. Open
+  **Calibration details** for read/model errors or saved/current geometry numbers.
+  A provisional startup mismatch must recover automatically at matching live
+  geometry; unchanged inputs must not cycle calibration states.
+- Optionally choose **Test gaze** once. While its window is open coaching pauses.
+  Cancel it, then try a failing result: the valid calibration must remain usable,
+  no calibration file may be rewritten, and coaching must resume without another
+  calibration/check. Failure may show a hint suggesting recalibration. A passing
+  test must not override a real geometry mismatch. Recalibration/setup cancellation
+  likewise uses a still-valid saved fit rather than revoking it by UI outcome.
 - Check pulses after eligible gaps, no pulse during a sustained map look, and
   suppression when dead, alt-tabbed, tracking lost or outside supported play.
   Delays have jitter and a density cap, so they are not exact metronome intervals.
@@ -155,8 +167,9 @@ native overlay correctness.
 
 ### Game 2 — the selected level
 
-- Confirm **8 s** survived restart if you restarted. Do the game's quick check.
-  This game should use the newly selected level; the end card should agree.
+- Confirm **8 s** survived restart if you restarted. Coaching should start
+  automatically with the same calibration, without clicking Test gaze or
+  recalibrating. This game should use the newly selected level; the end card should agree.
 - Try a different pulse style/colour and optional sound through Settings, then
   restore sound off. Saving appearance must not change the game goal. Closing
   Settings resumes coaching, without opening another calibration automatically.
@@ -167,7 +180,7 @@ native overlay correctness.
 ### Game 3 — solo
 
 - At game start, the tray tooltip should say **Solo game — no pulses or sound;
-  summary after play**. Do the usual quick check. No minimap outline, reminder,
+  summary after play**. No gaze test is required. No minimap outline, reminder,
   sound or live score should appear, even over long gaps. **Align minimap…** is
   unavailable during solo play. Timer selection must not bypass this suppression.
 - At game end, the card should say **Solo probe**, with zero pulses but measured
@@ -194,7 +207,8 @@ checking them.
 
 This session uses the gaze debug window and opt-in glance recorder, not timer
 mode or gaze-driven coaching. Use Windows 10/11 x64 and an AVX2-capable CPU.
-No Rust, Python, model downloads or developer tools are needed on the test PC.
+The MediaPipe fallback needs no developer tools. The stronger UniGaze tracker
+requires the one-time CUDA setup below; it installs its own private Python runtime.
 
 ### Download and run
 
@@ -214,11 +228,125 @@ No Rust, Python, model downloads or developer tools are needed on the test PC.
    other apps using the camera if it cannot open. Allow desktop camera access in
    Windows Settings → Privacy (or Privacy & security) → Camera.
 
+### One-time UniGaze setup (NVIDIA CUDA)
+
+Use a current NVIDIA driver (RTX 5090/Blackwell requires the included CUDA 12.8
+stack). Leave League and other camera apps closed. In PowerShell, from the
+extracted bundle directory, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\setup.ps1
+if ($LASTEXITCODE -ne 0) { throw 'UniGaze setup failed' }
+powershell -NoProfile -ExecutionPolicy Bypass -File .\models\unigaze\check.ps1
+if ($LASTEXITCODE -ne 0) { throw 'CUDA check failed; do not start calibration yet' }
+.\lucas.exe --calibrate
+```
+
+Setup downloads hash-verified official source/weights and pinned Python/CUDA
+dependencies into `models\unigaze` beside the app. Allow about 12 GB of free disk
+space. No administrator rights, system Python or CUDA SDK are needed. Setup and
+the model check never open the camera. Do not move the installed bundle or run
+setup while LUCAS is open; rerun setup after moving it. Details, hashes, licenses
+and developer reproduction steps: [UniGaze install](../models/unigaze/README.md).
+
+UniGaze is selected automatically when installed; its source/device appears in
+the tracking panel and tray status. If not installed, the app explicitly labels
+MediaPipe fallback. An installed but unavailable CUDA/model stack reports the
+failure: it does not silently run UniGaze on the CPU. To explicitly select the
+original tracker for a new calibration, quit all LUCAS processes, then run:
+
+```powershell
+$env:LUCAS_GAZE_SOURCE = 'mediapipe'
+.\lucas.exe --calibrate
+# For subsequent tray play in the same PowerShell session:
+.\lucas.exe
+# Restore automatic selection before a new UniGaze calibration:
+Remove-Item Env:LUCAS_GAZE_SOURCE -ErrorAction SilentlyContinue
+```
+
+`LUCAS_GAZE_SOURCE=unigaze` instead requires UniGaze and errors if missing. Keep
+the same selection for calibration, optional Test gaze, recording and play. Follow the
+[calibration guide](../crates/lucas-app/README.md#in-app-calibration) for saved-profile
+compatibility and when to repeat calibration.
+
+### Headless GPU model check (no camera)
+
+`lucas.exe --check-gaze-model` loads the pinned models on **cuda:0**, warms the
+whole SFD/FAN + UniGaze-H FP16 path on a bundled public face image, then performs
+20 timed inferences (3 measured-path warmups excluded). It prints the execution
+provider, GPU name, full-pipeline/model-only median and p95 latency, and CUDA
+allocated/reserved/peak memory including startup. Startup is bounded to 120 s,
+and the diagnostic to a further 60 s. Exit 0 means model execution succeeded;
+nonzero prints the specific missing asset/hash/CUDA/child-process error. Use the
+bundled `models\unigaze\check.ps1` helper above: it uses `Start-Process -Wait
+-NoNewWindow -RedirectStandardOutput -RedirectStandardError`, prints both logs,
+and returns the actual process exit code. A GUI-subsystem executable can otherwise
+return early or show no output in interactive PowerShell, even with `| Out-Host`.
+The logs remain under `models\unigaze\checks`. `--models <directory>` can select another model root;
+do not combine this diagnostic with camera or window modes.
+
+This is a runtime/latency check, **not an accuracy result**. See the
+[target-PC results](../models/unigaze/README.md#target-pc-headless-verification-2026-10-20)
+for reported webcam calibration evidence and its limits.
+
+### Calibrate with natural movement
+
+Adjust front lighting and camera placement, connect the camera, and wait for the
+source/device and live tracking indicators. First startup can take up to two
+minutes; model warmup completes before the camera opens. Enter your actual screen
+dimensions (for the investigated 27-inch display: 597×336 mm, 3840×2160) and your
+viewing distance (about 650 mm in that setup). Do not substitute Windows DPI.
+
+Follow the [in-app calibration guide](../crates/lucas-app/README.md#in-app-calibration)
+for target timing, natural movement, validation and saved-profile behavior. The
+[calibration reference](../crates/lucas-gaze/README.md#per-user-calibration-m51)
+explains the rectangular score and unchanged dwell/pass thresholds. Low mean
+error and high usable-frame coverage do not prove that map/elsewhere samples
+are separable; do not loosen thresholds to hide that failure.
+
+### One-run numeric calibration diagnostics (explicit opt-in)
+
+When tracking looks good but sensitivity is low, run one full calibration with
+this opt-in. It saves **gaze/pose numbers, not images**: raw and filtered features,
+acquisition/visibility/settling times, labels, geometry (including DPI/canvas),
+per-target scores/errors, the selected threshold/effective rectangle, and fitted
+weights. Failed/cancelled full calibrations are included. Nothing is uploaded.
+Files can reveal where you looked; share only the file you choose, then delete it
+when no longer needed; see the [Delete all data scope](../crates/lucas-store/README.md#privacy-controls)
+for separately exported files. Normal calibration does **not** export these samples.
+
+From the test bundle, close other LUCAS instances first:
+
+```powershell
+$oldDiagnostics = $env:LUCAS_CALIBRATION_DIAGNOSTICS
+$oldSource = $env:LUCAS_GAZE_SOURCE
+try {
+    $env:LUCAS_CALIBRATION_DIAGNOSTICS = Join-Path $PWD 'calibration-diagnostics'
+    $env:LUCAS_GAZE_SOURCE = 'unigaze'
+    Start-Process -FilePath (Join-Path $PWD 'lucas.exe') -ArgumentList '--calibrate' -Wait
+    # After one full calibration, note the result and close the debug window.
+} finally {
+    $env:LUCAS_CALIBRATION_DIAGNOSTICS = $oldDiagnostics
+    $env:LUCAS_GAZE_SOURCE = $oldSource
+}
+Get-ChildItem .\calibration-diagnostics\calibration-*.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1 FullName
+```
+
+Enter the true physical screen size (e.g. 597×336 mm), keep the assumed distance
+consistent, and check the selected camera and map alignment. Physical size changes
+the reported angular error but **not** the current normalized rectangular score
+for identical samples. A different sensitivity on a fresh run needs the numeric
+evidence; it cannot be attributed to mm alone. A threshold above 0.5 erodes all
+four edges; with fewer than 1,000 negative frames, the unchanged 0.1% FPR budget
+allows zero calibration false positives. Early transition samples can therefore
+raise that threshold substantially. Exports expose this rather than hiding it.
+
 The requested format is 1280×720 MJPEG at 30 fps. The debug view shows **Face
-found**, whether the eyes are usable, raw eye/head features, observed fps, capture /
-inference thread CPU time per frame, and heuristic tracking quality. The marker
-uses camera-space iris ratios: it is **not calibrated**, not a screen position,
-and not a minimap detection. No camera preview is shown or stored. Low quality,
+found**, whether the eyes are usable, raw eye/head features, observed fps, Rust
+inference-thread CPU time per frame, and heuristic tracking quality. In v2 traces the CPU figure covers the Rust
+inference thread only, not the capture thread or UniGaze child/GPU. The marker
+uses camera-space angles for UniGaze or iris ratios for MediaPipe: it is **not
+calibrated**, not a screen position, and not a minimap detection. No camera preview is shown or stored. Low quality,
 unknown eyes, or low fps are reasons to adjust lighting and placement first.
 
 ### Headless camera check (about 3 seconds)
@@ -227,12 +355,29 @@ Before the recording, close the debug window and other camera apps. In PowerShel
 in the extracted bundle directory, run this standalone option without other flags:
 
 ```powershell
-.\lucas.exe --check-camera | Out-Host
-$LASTEXITCODE
+$logDirectory = Join-Path $PWD ('camera-check-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $logDirectory | Out-Null
+$stdout = Join-Path $logDirectory 'stdout.txt'
+$stderr = Join-Path $logDirectory 'stderr.txt'
+$check = Start-Process -FilePath (Join-Path $PWD 'lucas.exe') -ArgumentList '--check-camera' `
+    -Wait -NoNewWindow -PassThru -ErrorAction Stop `
+    -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+Get-Content $stdout
+Get-Content $stderr
+"Exit code: $($check.ExitCode)"
+"Diagnostic logs: $logDirectory"
 ```
 
-The pipe waits for this Windows GUI-subsystem executable to finish. This opens
-camera **index 0** through the same `NokhwaCamera::open_c270` / `Camera::capture`
+This explicitly waits for the Windows GUI-subsystem executable and captures both
+output streams. Use **`$check.ExitCode`**, not `$LASTEXITCODE`, for this invocation.
+The logs remain in the printed directory; no images are saved. For the no-camera
+`--check-runtime`, `--version` or `--help` diagnostics, use this same pattern with
+only the `-ArgumentList` value changed. For `--check-gaze-model`, use the bundled
+[`check.ps1` helper](#headless-gpu-model-check-no-camera) instead. Direct invocation
+or `| Out-Host` can return early or display no output in interactive PowerShell.
+
+The `--check-camera` option opens camera **index 0** through the same
+`NokhwaCamera::open_c270` / `Camera::capture`
 path as the app, including acquisition timestamp validation. If several webcams
 are attached, disconnect the others so the C270 is index 0. No window, model
 inference, recording, or pixel output is involved; frames are cleared in RAM.
@@ -269,8 +414,8 @@ builds alone do not confirm C270 driver behavior.
   of 6, from 60 to 600 seconds. A short test is not the full evaluation session.
 - Check **I agree to save a numeric trace for this test**, then **Start fullscreen
   glance test**. Look at the countdown; when the dot appears, look at its centre
-  and keep looking there until it disappears. Keep your head comfortable and
-  mostly still. **Esc** ends early and saves a trace marked cancelled.
+  and keep looking there until it disappears. Move naturally within your calibrated
+  range of positions; do not deliberately freeze your head. **Esc** ends early and saves a trace marked cancelled.
 - The minimap target uses `lucas-geometry` at the actual main-monitor resolution.
   Before each test, LUCAS reads `MinimapScale` and `FlipMiniMap` from the discovered
   League installation's `Config/PersistedSettings.json`. For a custom installation,
@@ -297,14 +442,19 @@ and repeat, identifying the new position in the note. Run `cargo xtask eval
 calibration recordings, physical monitor dimensions and scoring rules. Synthetic
 tests do not establish real-webcam G2 acceptance.
 
-For in-app calibration and **Quick check**, follow the
+For in-app calibration and optional **Test gaze**, follow the
 [calibration guide](../crates/lucas-app/README.md#in-app-calibration), including
 physical monitor measurements, saved alignment and when to recalibrate.
 
 ### Troubleshooting / development
 
-- Missing model or hash error: re-extract the complete matching bundle. The app
-  never downloads replacement models. Do not change `SHA256SUMS` to bypass it.
+- Missing UniGaze model/hash/dependency: quit LUCAS and rerun its `setup.ps1`, then
+  run the bundled `check.ps1` as shown in [setup](#one-time-unigaze-setup-nvidia-cuda).
+  CUDA unavailable: check the NVIDIA driver and the private
+  CUDA 12.8 install; no CPU fallback is used. A child crash/timeout stops tracking
+  and reports an error. Reconnect only after the diagnostic succeeds.
+- Missing MediaPipe model/hash: re-extract the complete matching bundle. The app
+  never downloads replacements at runtime. Do not change model hashes to bypass checks.
 - Camera stopped / trace save error: check camera permissions, close other camera
   apps, and check disk space. Reconnect and start a new recording. A crash or
   forced shutdown can leave an incomplete trace; replay reports that explicitly.
@@ -320,7 +470,9 @@ physical monitor measurements, saved alignment and when to recalibrate.
 - From a source checkout: `cargo run -p lucas-app -- --models models`.
   `lucas.exe --seconds 60` opens the same setup; consent is still
   required. `lucas.exe --check-runtime` checks packaged models/runtime without
-  opening the camera. `--version` and `--help` do not open a window.
+  opening the camera. `--version` and `--help` do not open a window. Run these
+  CLI-only options with the [waited, file-captured pattern](#headless-camera-check-about-3-seconds)
+  above, replacing `-ArgumentList` with the desired option.
 - Offline, on Windows or Linux: `cargo xtask replay path/to/trace.jsonl` prints
   frames, valid-frame share, observed fps and per-target-kind feature distributions.
   See [the trace format](https://github.com/mackcee/lucas/blob/main/crates/lucas-app/README.md)

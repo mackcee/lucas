@@ -188,6 +188,7 @@ fn trace(bad: bool) -> Trace {
         let features = sample(p, 0).features.map(GazeFeatures::as_array);
         writer
             .frame(FrameRecord {
+                feature_kind: Default::default(),
                 timestamp_ns: timestamp.as_nanos() as u64,
                 source_timestamp_ns: timestamp.as_nanos() as u64,
                 features,
@@ -201,6 +202,35 @@ fn trace(bad: bool) -> Trace {
             .unwrap();
     }
     read_trace(writer.finish(EndReason::Completed).unwrap().as_slice()).unwrap()
+}
+#[test]
+fn unigaze_numeric_traces_use_the_existing_g2_evaluator() {
+    use lucas_gaze::features::FeatureKind;
+    let mut gaze = trace(false);
+    gaze.header.schema_version = 2;
+    for frame in &mut gaze.frames {
+        frame.feature_kind = FeatureKind::UniGaze;
+        let features = frame.features.map(|f| {
+            [
+                f[1] * 0.5,
+                f[0] * 0.7,
+                0.2,
+                0.2,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                650.0,
+            ]
+        });
+        frame.features = features;
+        frame.raw_features = features;
+    }
+    let result = lucas_app::eval::evaluate(&gaze, None, [531.0, 299.0], 650.0).unwrap();
+    assert_eq!(result.model.feature_kind(), FeatureKind::UniGaze);
+    assert!(result.evaluation.passes(), "{:?}", result.evaluation);
+    assert!(lucas_app::eval::evaluate(&gaze, Some(&trace(false)), [531.0, 299.0], 650.0).is_err());
 }
 #[test]
 fn heldout_synthetic_trace_passes_and_missed_glances_fail_g2() {
@@ -337,7 +367,15 @@ fn saved_alignment_controls_targets_labels_and_calibration_reuse() {
             (seed.left() + seed.right()) / 2.0,
             seed.top() - 0.04 * 1080.0,
         ));
-        let above = script.targets()[12].target;
+        let above = script
+            .targets()
+            .iter()
+            .find(|t| {
+                t.target.kind == TargetKind::Elsewhere
+                    && (t.target.position[0] - (map.left() + map.right()) / 3840.0).abs() < 1e-9
+            })
+            .expect("above-map confuser exists")
+            .target;
         assert_eq!(above.kind, TargetKind::Elsewhere);
         assert!((above.position[1] - (map.top() / 1080.0 - 0.04)).abs() < 1e-9);
         for target in script.targets() {

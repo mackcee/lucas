@@ -1,5 +1,6 @@
 //! Portable gaze orchestration. Only numeric samples enter this module; no I/O,
 //! camera frames, Win32 handles or wall clocks are owned by the core loop.
+pub mod calibration_status;
 pub mod camera;
 mod clock;
 #[cfg(windows)]
@@ -23,14 +24,12 @@ const STALE: Duration = Duration::from_millis(250);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CalibrationState {
     Needed,
-    QuickCheck,
     Ready,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     Waiting,
     CalibrationNeeded,
-    QuickCheckNeeded,
     TrackingLost,
     Paused,
     Active,
@@ -61,15 +60,14 @@ struct Session {
     pending_deaths: Vec<lucas_game::Death>,
 }
 
-/// One instance per tray process. Full calibration and each game's quick check
-/// are explicit actions. A failure latches Needed until a new full fit succeeds.
+/// One instance per tray process. A passing model, checked against the current
+/// geometry by the host, is reusable across games. Optional tests never revoke it.
 pub struct Runtime {
     settings: Settings,
     game: GameState,
     session: Option<Session>,
     model: Option<CalibrationModel>,
     detector: Option<CalibratedDetector>,
-    calibration: CalibrationState,
     last_sample: Option<Duration>,
     gaze: GazeState,
     previously_eligible: bool,
@@ -91,7 +89,6 @@ impl Runtime {
             session: None,
             model: None,
             detector: None,
-            calibration: CalibrationState::Needed,
             last_sample: None,
             gaze: GazeState::Unknown,
             previously_eligible: false,
@@ -105,7 +102,11 @@ impl Runtime {
         })
     }
     pub fn calibration(&self) -> CalibrationState {
-        self.calibration
+        if self.model.is_some() {
+            CalibrationState::Ready
+        } else {
+            CalibrationState::Needed
+        }
     }
     pub fn game(&self) -> &GameState {
         &self.game
@@ -147,33 +148,16 @@ impl Runtime {
     pub fn postgame_ready(&self) -> bool {
         self.postgame_ready && !self.in_session()
     }
-    pub fn begin_calibration(&mut self) -> Result<bool, CoreError> {
-        let quick = self.calibration == CalibrationState::QuickCheck && self.in_session();
-        if !quick {
-            self.install_calibration(None)?;
-        }
-        Ok(quick)
-    }
-
     pub fn install_calibration(
         &mut self,
         model: Option<CalibrationModel>,
     ) -> Result<(), CoreError> {
         self.model = model.filter(|m| m.validation().passes(m.target_false_positive_rate()));
-        self.calibration = if self.model.is_some() {
-            CalibrationState::QuickCheck
-        } else {
-            CalibrationState::Needed
-        };
         self.reset_detector()
     }
-    pub fn revalidated(&mut self, passed: bool) -> Result<(), CoreError> {
-        self.calibration =
-            if passed && self.model.is_some() && self.calibration != CalibrationState::Needed {
-                CalibrationState::Ready
-            } else {
-                CalibrationState::Needed
-            };
+    /// Release temporal gaze evidence at a camera/UI handoff, without discarding
+    /// a valid calibration or allowing dwell to span an interruption.
+    pub fn reset_gaze(&mut self) -> Result<(), CoreError> {
         self.reset_detector()
     }
     fn reset_detector(&mut self) -> Result<(), CoreError> {
@@ -202,6 +186,7 @@ impl Runtime {
     pub fn camera_wanted(&self, window_exists: bool, gaze_mode: bool, calibrating: bool) -> bool {
         gaze_mode
             && !calibrating
+            && self.model.is_some()
             && self.session.is_some()
             && if self.settings.live_client_gate {
                 self.game.api_available()
@@ -307,9 +292,6 @@ impl Runtime {
             unknown_deaths: Vec::new(),
             pending_deaths: Vec::new(),
         });
-        if self.calibration != CalibrationState::Needed {
-            self.calibration = CalibrationState::QuickCheck;
-        }
         self.reset_detector()
     }
     /// Run at ~30Hz. Each acquisition is fed to the detector exactly once; a
@@ -355,7 +337,7 @@ impl Runtime {
                 paused: input.paused || !input.geometry_ready || !input.gaze_mode,
             }
         };
-        let allowed = base.eligible() && self.calibration == CalibrationState::Ready;
+        let allowed = base.eligible() && self.calibration() == CalibrationState::Ready;
         if !allowed && self.previously_eligible {
             self.reset_detector()?;
         }
@@ -471,10 +453,8 @@ impl Runtime {
         }
         let status = if self.session.is_none() {
             Status::Waiting
-        } else if self.calibration == CalibrationState::Needed {
+        } else if self.calibration() == CalibrationState::Needed {
             Status::CalibrationNeeded
-        } else if self.calibration == CalibrationState::QuickCheck {
-            Status::QuickCheckNeeded
         } else if !base.eligible() {
             Status::Paused
         } else if !tracking {

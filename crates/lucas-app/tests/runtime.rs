@@ -97,7 +97,6 @@ fn inputs() -> Inputs {
 }
 fn ready(runtime: &mut Runtime, model: CalibrationModel) {
     runtime.install_calibration(Some(model)).unwrap();
-    runtime.revalidated(true).unwrap();
 }
 
 #[test]
@@ -347,7 +346,7 @@ fn failed_poll_makes_outage_deaths_unknown_but_preserves_earlier_evidence() {
 }
 
 #[test]
-fn calibration_needed_failed_quick_and_each_game_routing() {
+fn calibration_is_needed_only_without_a_usable_model_and_survives_each_game() {
     let mut runtime = Runtime::new(Settings::default()).unwrap();
     runtime
         .poll(
@@ -369,12 +368,7 @@ fn calibration_needed_failed_quick_and_each_game_routing() {
         Status::CalibrationNeeded
     );
     runtime.install_calibration(Some(fitted())).unwrap();
-    assert_eq!(runtime.calibration(), CalibrationState::QuickCheck);
-    runtime.revalidated(false).unwrap();
-    assert_eq!(runtime.calibration(), CalibrationState::Needed);
-    runtime.revalidated(true).unwrap(); // cannot un-latch a failed fit with stale weights
-    assert_eq!(runtime.calibration(), CalibrationState::Needed);
-    ready(&mut runtime, fitted());
+    assert_eq!(runtime.calibration(), CalibrationState::Ready);
     runtime
         .poll(
             Duration::from_millis(1001),
@@ -389,44 +383,111 @@ fn calibration_needed_failed_quick_and_each_game_routing() {
             2001,
         )
         .unwrap();
-    assert_eq!(runtime.calibration(), CalibrationState::QuickCheck);
+    assert_eq!(runtime.calibration(), CalibrationState::Ready);
     runtime.install_calibration(None).unwrap(); // changed screen/alignment
     assert_eq!(runtime.calibration(), CalibrationState::Needed);
 }
 
 #[test]
-fn full_recalibration_revokes_readiness_until_fit_and_quick_check_succeed() {
+fn calibration_windows_pause_gaze_without_revoking_the_saved_fit() {
     let mut runtime = Runtime::new(Settings::default()).unwrap();
     runtime
         .poll(Duration::ZERO, Some(&snapshot(100.0, false, vec![])), 0)
         .unwrap();
     ready(&mut runtime, fitted());
-    assert!(!runtime.begin_calibration().unwrap());
-    assert_eq!(runtime.calibration(), CalibrationState::Needed);
-    runtime.revalidated(true).unwrap();
+    runtime.reset_gaze().unwrap();
+    assert_eq!(runtime.calibration(), CalibrationState::Ready);
     for ms in 1..=300 {
         let tick = runtime
             .tick(
                 Duration::from_millis(ms),
-                inputs(),
+                Inputs {
+                    paused: true,
+                    ..inputs()
+                },
                 Some(sample(ms, [0.5, 0.5])),
                 ms,
             )
             .unwrap();
-        assert_eq!(tick.status, Status::CalibrationNeeded);
+        assert_eq!(tick.status, Status::Paused);
         assert!(tick.hide);
         assert!(tick.pulse.is_none());
         assert_eq!(tick.gap_ms, 0);
     }
-    runtime.install_calibration(Some(fitted())).unwrap();
-    assert_eq!(runtime.calibration(), CalibrationState::QuickCheck);
-    assert!(runtime.begin_calibration().unwrap());
-    runtime.revalidated(true).unwrap();
+    runtime.reset_gaze().unwrap();
     assert_eq!(runtime.calibration(), CalibrationState::Ready);
+    let resumed = runtime
+        .tick(
+            Duration::from_millis(301),
+            inputs(),
+            Some(sample(301, [0.5, 0.5])),
+            301,
+        )
+        .unwrap();
+    assert_eq!(resumed.status, Status::Active);
+    assert_eq!(resumed.gap_ms, 0);
+    assert!(resumed.pulse.is_none());
 }
 
 #[test]
-fn reconnect_after_window_loss_starts_a_revalidated_session_without_replaying_deaths() {
+fn missing_calibration_stops_camera_without_stopping_session_ticks() {
+    let model = fitted();
+    for live_client_gate in [true, false] {
+        for recalibrating in [true, false] {
+            let mut runtime = Runtime::new(Settings {
+                live_client_gate,
+                ..Settings::default()
+            })
+            .unwrap();
+            runtime
+                .poll(Duration::ZERO, Some(&snapshot(100.0, false, vec![])), 0)
+                .unwrap();
+            runtime.tick(Duration::ZERO, inputs(), None, 0).unwrap();
+            assert!(runtime.in_session());
+            assert!(!runtime.camera_wanted(true, true, false));
+            ready(&mut runtime, model.clone());
+            assert!(runtime.camera_wanted(true, true, false));
+
+            // Missing or invalidated calibration is still a hard camera gate.
+            // A calibration window separately pauses a valid model.
+            if recalibrating {
+                runtime.reset_gaze().unwrap();
+            }
+            runtime.install_calibration(None).unwrap();
+            for ms in 1..=3 {
+                assert!(!runtime.camera_wanted(true, true, false));
+                let tick = runtime
+                    .tick(Duration::from_millis(ms), inputs(), None, ms)
+                    .unwrap();
+                assert_eq!(tick.status, Status::CalibrationNeeded);
+                assert!(tick.hide);
+                assert!(tick.pulse.is_none());
+                assert!(runtime.in_session());
+            }
+
+            runtime.install_calibration(Some(model.clone())).unwrap();
+            assert!(runtime.camera_wanted(true, true, false));
+            assert!(!runtime.camera_wanted(true, true, true));
+            assert_eq!(
+                runtime
+                    .tick(
+                        Duration::from_millis(4),
+                        inputs(),
+                        Some(sample(4, [0.5, 0.5])),
+                        4
+                    )
+                    .unwrap()
+                    .status,
+                Status::Active
+            );
+            assert_eq!(runtime.calibration(), CalibrationState::Ready);
+            assert!(runtime.camera_wanted(true, true, false));
+        }
+    }
+}
+
+#[test]
+fn reconnect_after_window_loss_reuses_calibration_without_replaying_deaths() {
     let mut runtime = Runtime::new(Settings::default()).unwrap();
     let death = event(1, 99.0, "ChampionKill");
     runtime
@@ -455,7 +516,7 @@ fn reconnect_after_window_loss_starts_a_revalidated_session_without_replaying_de
     assert!(runtime.in_session());
     assert!(!runtime.postgame_ready());
     assert!(runtime.camera_wanted(true, true, false));
-    assert_eq!(runtime.calibration(), CalibrationState::QuickCheck);
+    assert_eq!(runtime.calibration(), CalibrationState::Ready);
     let tick = runtime
         .tick(
             Duration::from_secs(2),
@@ -464,8 +525,8 @@ fn reconnect_after_window_loss_starts_a_revalidated_session_without_replaying_de
             2000,
         )
         .unwrap();
-    assert_eq!(tick.status, Status::QuickCheckNeeded);
-    assert!(tick.hide);
+    assert_eq!(tick.status, Status::Active);
+    assert!(!tick.hide);
     runtime
         .poll(
             Duration::from_secs(3),
@@ -657,6 +718,9 @@ fn camera_lifetime_start_loss_reconnect_calibration_end_and_exit() {
             1,
         )
         .unwrap();
+    sync(&mut capture, &runtime, false);
+    assert_eq!(opens.load(Ordering::SeqCst), 0);
+    runtime.install_calibration(Some(fitted())).unwrap();
     sync(&mut capture, &runtime, false);
     sync(&mut capture, &runtime, false);
     assert_eq!(opens.load(Ordering::SeqCst), 1);

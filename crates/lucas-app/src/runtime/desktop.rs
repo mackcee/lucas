@@ -1,7 +1,8 @@
 //! Windows process/UI boundary. Calibration is offered, never forced over a
 //! live game. Subprocesses give eframe its own main thread and camera ownership.
+use super::calibration_status::{CalibrationOutcome, CalibrationStatus, Geometry, GeometrySource};
 use super::{CalibrationState, Inputs, Runtime, Tick, native_camera::CameraWorker};
-use crate::calibration;
+use crate::calibration::{self, CalibrationIssue};
 use lucas_geometry::Rect;
 use lucas_store::{ScreenGeometry, Store};
 use std::{
@@ -24,7 +25,7 @@ pub struct Desktop {
     controls: Option<(Child, bool)>,
     pub controls_notice: Option<String>,
     delete_requested: bool,
-    geometry: Option<(ScreenGeometry, [f64; 4])>,
+    calibration_status: CalibrationStatus,
     generation: u64,
     origin: Instant,
     models: PathBuf,
@@ -35,12 +36,8 @@ impl Desktop {
         let store = Store::open()?;
         let mut runtime = Runtime::new(store.load_settings()?)?;
         // Provisional only: actual game geometry must still match before use.
-        let model = store
-            .load_calibration()
-            .ok()
-            .flatten()
-            .and_then(|c| lucas_gaze::calibration::CalibrationModel::from_bytes(&c.model).ok());
-        runtime.install_calibration(model)?;
+        let mut calibration_status = CalibrationStatus::default();
+        calibration_status.reload(&store, &mut runtime)?;
         Ok(Self {
             runtime,
             camera: None,
@@ -49,7 +46,7 @@ impl Desktop {
             controls: None,
             controls_notice: None,
             delete_requested: false,
-            geometry: None,
+            calibration_status,
             generation: 0,
             origin,
             models: std::env::current_exe()?
@@ -58,6 +55,16 @@ impl Desktop {
                 .join("models"),
             pending: Vec::new(),
         })
+    }
+    pub fn calibration_issue(&self) -> Option<&CalibrationIssue> {
+        self.calibration_status.issue()
+    }
+    pub fn calibration_message(&self) -> String {
+        match &self.calibration {
+            Some(task) if task.quick => "Test gaze running — coaching paused".into(),
+            Some(_) => "Calibrating gaze — coaching paused".into(),
+            None => self.calibration_status.needed_message(),
+        }
     }
     pub fn editing(&self) -> bool {
         self.controls.is_some()
@@ -68,11 +75,9 @@ impl Desktop {
         }
         self.camera = None;
         self.close_card();
-        if setup {
-            // Explicit setup includes recalibration; stale readiness must not
-            // return when setup is cancelled or the camera choice changes.
-            self.runtime.install_calibration(None)?;
-        }
+        // Pause camera ownership and temporal evidence, not the saved fit.
+        // On closing setup we assess what was actually persisted, even on cancel.
+        self.runtime.reset_gaze()?;
         let child = Command::new(std::env::current_exe()?)
             .arg(if setup {
                 "--runtime-setup"
@@ -90,7 +95,7 @@ impl Desktop {
         let previous = self.runtime.sequence;
         self.runtime.poll(at, snapshot, unix_ms())?;
         self.pending.extend(self.runtime.take_summaries());
-        // A new session invalidates a quick check launched for the previous one.
+        // A session change may make optional test feedback stale, never the fit.
         if previous != self.runtime.sequence {
             self.generation += 1;
             self.camera = None;
@@ -101,46 +106,54 @@ impl Desktop {
         }
         Ok(())
     }
-    pub fn geometry(&mut self, screen: ScreenGeometry, rect: Rect) -> Result<()> {
+    pub fn geometry(
+        &mut self,
+        screen: ScreenGeometry,
+        rect: Rect,
+        source: GeometrySource,
+    ) -> Result<()> {
         let map = [
             (rect.left() - screen.left as f64) / screen.width as f64,
             (rect.top() - screen.top as f64) / screen.height as f64,
             (rect.right() - screen.left as f64) / screen.width as f64,
             (rect.bottom() - screen.top as f64) / screen.height as f64,
         ];
-        let geometry = (screen, map);
-        if self.geometry.as_ref() != Some(&geometry) {
+        let update = self.calibration_status.update_geometry(
+            Geometry {
+                screen,
+                minimap: map,
+            },
+            source,
+        );
+        if update.changed {
             self.generation += 1;
-            self.geometry = Some(geometry);
-            if self.runtime.calibration() != CalibrationState::Needed && !self.calibrating() {
-                self.reload()?;
-            }
+        }
+        if update.reload {
+            self.reload()?;
         }
         Ok(())
     }
     fn reload(&mut self) -> Result<()> {
-        self.runtime.settings.camera_index = Store::open()?.load_settings()?.camera_index;
-        let model = if let Some((screen, map)) = &self.geometry {
-            calibration::load(&Store::open()?, screen, *map).unwrap_or(None)
-        } else {
-            Store::open()?
-                .load_calibration()
-                .ok()
-                .flatten()
-                .and_then(|c| lucas_gaze::calibration::CalibrationModel::from_bytes(&c.model).ok())
-        };
-        self.runtime.install_calibration(model)?;
+        let store = Store::open()?;
+        self.runtime.settings.camera_index = store.load_settings()?.camera_index;
+        self.calibration_status.reload(&store, &mut self.runtime)?;
         Ok(())
     }
     pub fn launch_calibration(&mut self) -> Result<()> {
+        self.launch_capture(false)
+    }
+    pub fn launch_gaze_test(&mut self) -> Result<()> {
+        self.launch_capture(true)
+    }
+    fn launch_capture(&mut self, quick: bool) -> Result<()> {
         if self.calibration.is_some() || self.editing() {
             return Ok(());
         }
-        self.camera = None; // joined and released before the child can open it
-        if self.runtime.calibration() == CalibrationState::QuickCheck && self.runtime.in_session() {
-            self.reload()?;
+        if quick && self.runtime.calibration() != CalibrationState::Ready {
+            return Err("Calibrate gaze before using Test gaze".into());
         }
-        let quick = self.runtime.begin_calibration()?;
+        self.camera = None; // joined and released before the child can open it
+        self.runtime.reset_gaze()?;
         let mut command = Command::new(std::env::current_exe()?);
         if quick {
             let model = self
@@ -172,15 +185,15 @@ impl Desktop {
             let (_, setup) = self.controls.take().unwrap();
             self.delete_requested |=
                 status.code() == Some(crate::postgame::DELETE_REQUESTED_EXIT_CODE as i32);
+            if setup && !self.delete_requested {
+                self.reload()?;
+            }
             if status.success() {
                 let settings = Store::open()?.load_settings()?;
                 self.runtime.update_preferences(&settings)?;
-                if setup {
-                    self.reload()?;
-                }
                 self.controls_notice = Some(
                     if setup {
-                        "Setup complete — align the minimap and quick-check before play"
+                        "Setup complete — coaching starts automatically in matching games"
                     } else {
                         "Settings saved — training level applies next game"
                     }
@@ -201,11 +214,30 @@ impl Desktop {
             && let Some(status) = task.child.try_wait()?
         {
             let task = self.calibration.take().unwrap();
+            let outcome = CalibrationOutcome::from_code(status.code());
             if task.quick {
-                self.runtime
-                    .revalidated(status.success() && task.generation == self.generation)?;
-            } else if status.success() {
+                let same_generation = task.generation == self.generation;
+                self.controls_notice = Some(
+                    self.calibration_status
+                        .finish_test(&mut self.runtime, outcome, same_generation)?
+                        .into(),
+                );
+            } else {
+                // Failed/cancelled fits never replace a passing persisted fit.
+                // Re-assess the saved file, rather than latching a UI outcome.
                 self.reload()?;
+                self.controls_notice = Some(
+                    match (status.success(), self.runtime.calibration()) {
+                        (true, CalibrationState::Ready) => {
+                            "Calibrated — coaching starts automatically in matching games"
+                        }
+                        (false, CalibrationState::Ready) => {
+                            "Calibration closed — using the usable saved calibration"
+                        }
+                        _ => "Calibration unavailable — see Calibration details",
+                    }
+                    .into(),
+                );
             }
         }
         inputs.paused |= self.calibrating() || self.editing() || self.delete_requested;
@@ -221,7 +253,15 @@ impl Desktop {
                 self.runtime.settings().camera_index,
                 self.models.clone(),
                 self.origin,
+                self.runtime
+                    .model
+                    .as_ref()
+                    .ok_or("calibration unavailable")?
+                    .feature_kind(),
             )?);
+        }
+        if let Some(notice) = self.camera.as_ref().and_then(CameraWorker::take_notice) {
+            self.controls_notice = Some(notice);
         }
         let sample = self.camera.as_ref().and_then(CameraWorker::take_sample);
         let previous = self.runtime.sequence;

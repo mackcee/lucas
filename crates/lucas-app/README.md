@@ -80,20 +80,23 @@ or `lucas --seconds 600` for the standalone shared gaze window.
 ## Data boundary
 
 The UI and recorder receive only `GazeSample`, derived feature arrays and numeric
-telemetry. RGB never crosses that boundary; `lucas-gaze` clears its in-memory frame
-ring after inference. There is no screenshot, video, image serializer, upload,
+telemetry. RGB never crosses that UI/recorder boundary; `lucas-gaze` clears its
+owned frame buffers after inference. UniGaze receives the current RGB frame only
+in its LUCAS-owned local process, through anonymous pipes. There is no screenshot, video, image serializer, upload,
 background trace or crash-dump facility. Model inputs stay in the gaze pipeline.
 Starting the camera alone writes no trace. Every new recording requires consent.
 
-A dedicated below-normal-priority thread captures and infers. The UI reads a
+A below-normal-priority thread captures into a single replaceable frame slot;
+a separate worker infers the latest frame with the selected gaze source. The UI reads a
 single latest numeric sample, so it cannot queue camera frames. Trace writing
-happens on the capture thread, independently of the UI refresh rate. Samples
+happens on the inference/recording worker, independently of the UI refresh rate. Samples
 acquired before the first target presentation or outside the script duration
-are not written. CPU time is capture/inference **thread CPU time**, not blocking
-camera wall time. FPS is measured over the latest 60 acquisition timestamps.
+are not written. CPU time is the Rust **inference/recording thread CPU time**,
+not camera wall time; it excludes the separate capture thread and UniGaze process/GPU work. Use
+`--check-gaze-model` for full-pipeline/model timing. FPS is measured over the latest 60 acquisition timestamps.
 The quality value is a heuristic, never a claim about detection accuracy.
 
-## JSON-lines schema v1
+## JSON-lines schema v2 (v1 remains readable)
 
 One UTF-8 JSON object per line: a header, frame records, then an end record.
 The authoritative field names, types, enum spellings and validation limits are
@@ -103,11 +106,13 @@ types in [`script.rs`](src/script.rs) and minimap metadata in
 schema. `timestamp_ns` is relative to test start; `source_timestamp_ns` preserves
 the camera-open origin.
 
-Feature arrays follow `trace::FEATURE_NAMES` in [`trace.rs`](src/trace.rs).
-Head angles are in radians; relative distance is inverse fit scale, not metres.
-Right/left are anatomical; eye coordinates are in the unmirrored camera image.
-`raw_features` is extraction before smoothing; `features` is the M4.1 One-Euro
-output. Both are null for unknown/closed/occluded eyes, even when a face is found.
+Each v2 frame carries `feature_kind`: `media_pipe` or `uni_gaze`. Legacy v1
+frames default to MediaPipe; mixing sources in one trace is rejected. Arrays
+follow `trace::feature_names(kind)` in [`trace.rs`](src/trace.rs). MediaPipe eye
+ratios/relative distance retain their original units; UniGaze uses camera-space
+pitch/yaw in radians, apertures, normalized head pose, and face centre in mm.
+Right/left eyes are anatomical; images are unmirrored. `raw_features` precedes
+smoothing; `features` is One-Euro output (only the two angles for UniGaze). Both are null for unknown/closed/occluded eyes, even when a face is found.
 Unknown frames always have zero quality and are never silently counted as checks.
 
 `target` is null outside focused `hold` phases. During a hold it contains a unique
@@ -128,7 +133,7 @@ The header wall clock identifies the session; durations use monotonic time.
 Minimizing/unfocusing is unlabelled and does not pause the script. On completion or
 cancellation, in-flight samples not delivered before finalization are not stored.
 
-The capture worker uses create-new filenames and syncs the file after the trace
+The recording worker uses create-new filenames and syncs the file after the trace
 writer flushes an explicit end record on orderly stop. The writer checks finite
 values and increasing times, and periodically flushes frames.
 The reader rejects unsupported schemas, extra fields (including pixel payloads),
@@ -165,9 +170,17 @@ Defaults are 531×299 mm and 650 mm (24-inch 16:9); Windows DPI is not physical 
 Use your usual playing position and glasses. The same main-monitor fullscreen
 window/amber dot renderer as the glance test presents a 46-second sequence:
 
-- Nine grid points, centre/ability bar/scoreboard/lane-above/lane-beside negatives.
-- Five dense minimap-corner points, the last two with a slight head turn.
-- Four independent validation targets (two map looks, centre and lane beside).
+- Nine grid points in a comfortable position.
+- From 18 seconds, five dense map points interleaved with centre/ability bar/
+  scoreboard/lane-above/lane-beside negatives. Shift naturally through this block:
+  lean, turn and move a little closer or farther while following the dots.
+- Four independent validation occurrences: two map looks and points just above
+  and beside the map.
+
+Saved calibration identifies both the source and the rectangular decision.
+Older half-plane fits must be repeated, including when continuing with MediaPipe.
+Repeat full calibration after changing source, camera position, lighting or map
+geometry; a MediaPipe fit cannot be reused with UniGaze.
 
 The map comes from `lucas-geometry` using the League settings and the saved
 alignment profile for the main-monitor resolution, MinimapScale and flip. See the
@@ -177,12 +190,14 @@ for settings discovery, fallback and installation overrides, and
 for saving corrections. A missing profile uses the geometry seed; an invalid
 alignment file blocks calibration. The corrected rectangle determines target
 placement, labels and saved-model geometry comparisons. Changing that rectangle
-requires full calibration again before Quick check can reuse a model.
+requires a passing full calibration again before that model can be used.
 
-Each two-second target has a 500 ms prompt followed by a hold;
-the first 200 ms after a displayed hold are discarded for settling. Target labels
-are matched to capture acquisition times, not UI receipt. Losing focus leaves
-frames unlabelled; it does not pause the schedule. Missing target coverage fails
+Each two-second calibration target is visible through a 500 ms settling phase
+and the following hold. Collection requires at least 200 ms of hold time and
+700 ms of continuous target visibility, including after focus returns or a
+delayed UI submission. Target labels are matched to capture acquisition times,
+not UI receipt. Losing focus leaves frames unlabelled and resets visibility
+settling; it does not pause the schedule. Missing target coverage fails
 calibration. Escape cancels without replacing previous weights.
 
 Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
@@ -190,23 +205,31 @@ Tracking quality is visible, and sampled mean luma below 0.15 asks for a light
 shows mean angular error, sensitivity/FPR and pass/fail. In standalone or tray
 calibration, only passing fits save weights/geometry/validation aggregates through
 `lucas-store` and update the saved camera selection; failures retain the previous
-model. First-run setup instead uses the [draft and Finish contract](src/runtime/README.md#before-play).
-Full calibration samples never create a numeric trace file.
+saved profile on disk. The tray automatically uses a passing fit matching the
+current geometry; optional testing never revokes it. See the
+[runtime contract](src/runtime/README.md#before-play). First-run setup instead uses the draft and
+Finish contract in the same runtime guide.
+Full calibration samples are discarded by default. For the separate opt-in
+export, its contents and privacy controls, see the
+[one-run diagnostic instructions](../../docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).
 The separate glance recorder still requires explicit opt-in for each recording.
 
-**Quick check** uses one minimap and one centre target in four seconds. It neither
-refits nor saves and must use the saved calibrated camera. Repeat full calibration
-after a failed quick check. For integrations:
+**Test gaze** is optional: one minimap and one centre target in four seconds.
+It neither refits nor saves and must use the saved calibrated camera. A failed or
+cancelled test never revokes a passing matching fit; its feedback can suggest
+recalibration if tracking seems wrong. For integrations:
 
 1. Construct `CalibrationScript::new` with the current settings and loaded
    `AlignmentStore` as above. Pass its `screen().minimap` to
    `calibration::load(store, current_screen, current_minimap)`, which rejects
    changed desktop origin/resolution/DPI/map geometry or unsupported model bytes.
-2. Present `CalibrationScript::quick(&model)` using the same fullscreen target
-   path; collect `Observation`s by displayed target and acquisition time.
-3. Call `quick_revalidate(&model, observations)` and require
-   `validation.passes(model.target_false_positive_rate())` before enabling gaze.
-4. Feed the camera stream to `lucas_gaze::decision::CalibratedDetector`.
+2. Use a passing matching model with `lucas_gaze::decision::CalibratedDetector`
+   automatically, subject to ordinary tracking/foreground/game eligibility.
+3. Only when the user requests a test, present `CalibrationScript::quick(&model)`
+   and collect `Observation`s by displayed target and acquisition time.
+4. `quick_revalidate(&model, observations)` and
+   `validation.passes(model.target_false_positive_rate())` determine the optional
+   test result, not coaching permission. Do not replace or revoke the saved fit.
 
 The [runtime guide](src/runtime/README.md#before-play) owns game-start routing,
 calibration snapshot matching and failure handling for the tray integration.
@@ -217,5 +240,8 @@ CI builds on GitHub-hosted Windows/MSVC, copies pinned models and native DLLs,
 adds app-local VC runtimes and notices, zips the bundle, then runs
 `--check-runtime` from the extracted ZIP with a system-only PATH. ONNX Runtime
 1.31 is statically linked by ort rc.14; its DirectML DLL is still included even
-though LUCAS explicitly selects only the CPU provider. Font and binary runtime
+though the MediaPipe fallback selects only the CPU provider. The optional
+UniGaze installer/scripts are packaged through an explicit allowlist, never
+installed weights, Python environments or caches. See
+[UniGaze setup](../../models/unigaze/README.md) for CUDA and diagnostic details. Font and binary runtime
 licenses remain their upstream licenses; LUCAS source remains MIT OR Apache-2.0.

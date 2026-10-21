@@ -1,4 +1,5 @@
-//! Offline webcam-to-feature pipeline. No network, frame serialization, or logging.
+//! Offline webcam-to-feature pipeline. No network inference, frame recording,
+//! or pixel logging. UniGaze's owned local child receives RGB over anonymous pipes.
 //!
 //! Coordinates refer to the **unmirrored** camera image, not the screen. Feature
 //! samples require downstream calibration/classification before `lucas-core` can
@@ -13,9 +14,13 @@ pub mod decision;
 pub mod features;
 pub mod filter;
 pub mod landmarks;
+pub mod latest;
 pub mod models;
 pub mod runtime;
 pub mod source;
+#[cfg(feature = "ort")]
+pub mod tracker;
+pub mod unigaze;
 
 pub use camera::{Camera, Frame, FrameRing, ImageCamera};
 pub use features::{GazeFeatures, HeadPose};
@@ -38,6 +43,7 @@ pub enum Error {
     InvalidOutput,
     InvalidFilter,
     ThreadPriority,
+    Source(String),
 }
 
 impl std::fmt::Display for Error {
@@ -58,6 +64,7 @@ impl std::fmt::Display for Error {
             Self::InvalidOutput => "invalid model output",
             Self::InvalidFilter => "invalid One-Euro filter parameters",
             Self::ThreadPriority => "could not lower capture/inference thread priority",
+            Self::Source(message) => message,
         })
     }
 }

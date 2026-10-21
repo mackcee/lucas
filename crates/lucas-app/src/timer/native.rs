@@ -89,13 +89,13 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let mut last_rect = None;
 
     let status_item = MenuItem::new("Waiting for a game", false, None);
-    let notice_item = MenuItem::new(
-        "Gaze mode: complete a quick check from the tray each game",
-        false,
-        None,
-    );
+    let calibration_details = Submenu::new("Calibration details", false);
+    let mut reason_items: Vec<MenuItem> = Vec::new();
+    let mut last_reason = Vec::new();
+    let notice_item = MenuItem::new("Calibrate once; Test gaze is optional", false, None);
     let timer_option = CheckMenuItem::new("Timer mode (no gaze)", true, timer_mode, None);
     let calibrate = MenuItem::new("Calibrate gaze...", true, None);
+    let test_gaze = MenuItem::new("Test gaze (optional, 4 seconds)...", false, None);
     let levels = Submenu::new("Training level (next game)", true);
     let level_items: Vec<_> = crate::preferences::selectable_levels()
         .map(|(i, level)| {
@@ -129,6 +129,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
     let quit = MenuItem::new("Quit", true, None);
     let menu = Menu::with_items(&[
         &status_item,
+        &calibration_details,
         &notice_item,
         &PredefinedMenuItem::separator(),
         &pause,
@@ -138,6 +139,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         &setup,
         &timer_option,
         &calibrate,
+        &test_gaze,
         &align,
         &report,
         &live_gate,
@@ -165,16 +167,16 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         )?;
         let settings = read_hud(&locator).unwrap_or_default();
         let rect = minimap_rect(client, settings, store.get(Key::new(client, settings)))?;
-        gaze.geometry(screen, rect)?;
+        gaze.geometry(
+            screen,
+            rect,
+            crate::runtime::calibration_status::GeometrySource::Provisional,
+        )?;
     }
-    // Never steal game focus: quick checks and mid-game recalibration are tray actions.
+    // Only first-run setup opens automatically. Recalibration and optional
+    // testing are explicit actions, never popups caused by provisional geometry.
     if setup_pending {
         gaze.launch_controls(true)?;
-    } else if !timer_mode
-        && !probe.sample().unwrap_or_default().exists
-        && gaze.runtime.calibration() == crate::runtime::CalibrationState::Needed
-    {
-        gaze.launch_calibration()?;
     }
 
     while !quit_requested {
@@ -305,11 +307,15 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 notice_item.set_text(if timer_mode {
                     "Timer mode: no gaze; fixed 10-second reminders"
                 } else {
-                    "Gaze mode: quick check required each game"
+                    "Gaze mode: saved calibration is reused automatically"
                 });
             } else if event.id == *calibrate.id() {
                 if let Err(error) = gaze.launch_calibration() {
                     notice_item.set_text(format!("Calibration unavailable: {error}"));
+                }
+            } else if event.id == *test_gaze.id() {
+                if let Err(error) = gaze.launch_gaze_test() {
+                    notice_item.set_text(format!("Test gaze unavailable: {error}"));
                 }
             } else if event.id == *pause.id() {
                 timer.set_paused(!timer.paused());
@@ -505,6 +511,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                         scale_factor: dpi as f64 / 96.0,
                     },
                     rect,
+                    crate::runtime::calibration_status::GeometrySource::LiveGame,
                 )?;
             }
         }
@@ -523,14 +530,33 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
             break;
         }
         calibrate.set_text(match gaze.runtime.calibration() {
-            crate::runtime::CalibrationState::Needed => "Calibration needed / recalibrate...",
-            crate::runtime::CalibrationState::QuickCheck => "Quick check required (4 seconds)...",
+            crate::runtime::CalibrationState::Needed => "Calibrate gaze...",
             crate::runtime::CalibrationState::Ready => "Recalibrate gaze...",
         });
-        calibrate.set_enabled(!gaze.calibrating() && !gaze.editing() && !setup_pending);
+        let can_calibrate = !gaze.calibrating() && !gaze.editing() && !setup_pending;
+        calibrate.set_enabled(can_calibrate);
+        test_gaze.set_enabled(
+            can_calibrate && gaze.runtime.calibration() == crate::runtime::CalibrationState::Ready,
+        );
         setup_pending = !timer_mode && crate::preferences::needs_setup(gaze.runtime.settings());
         if let Some(notice) = gaze.controls_notice.take() {
             notice_item.set_text(notice);
+        }
+        let reason = gaze
+            .calibration_issue()
+            .map(|r| r.details())
+            .unwrap_or_default();
+        if reason != last_reason {
+            for item in reason_items.drain(..) {
+                calibration_details.remove(&item)?;
+            }
+            for row in &reason {
+                let item = MenuItem::new(row, false, None);
+                calibration_details.append(&item)?;
+                reason_items.push(item);
+            }
+            calibration_details.set_enabled(!reason.is_empty());
+            last_reason = reason;
         }
         for (index, item) in &level_items {
             item.set_checked(*index == gaze.runtime.settings().level_index);
@@ -610,10 +636,13 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
                 }
             }
         }
+        let calibration_message = gaze.calibration_message();
         let text = if gaze.runtime.solo_active() {
             "Solo game — no pulses or sound; summary after play"
         } else if gaze.editing() || setup_pending {
             "Setup / settings — coaching paused"
+        } else if gaze.calibrating() {
+            &calibration_message
         } else if alignment.is_some() {
             "Paused — use LUCAS alignment panel (Save / Cancel)"
         } else if timer.paused() {
@@ -625,12 +654,7 @@ fn run_session(mut timer_mode: bool) -> Result<bool> {
         } else if !timer_mode {
             match gaze_tick.status {
                 crate::runtime::Status::Waiting => "Waiting for a game",
-                crate::runtime::Status::CalibrationNeeded => {
-                    "Calibration needed — choose Calibrate gaze"
-                }
-                crate::runtime::Status::QuickCheckNeeded => {
-                    "Quick check needed — open it from the tray before play"
-                }
+                crate::runtime::Status::CalibrationNeeded => &calibration_message,
                 crate::runtime::Status::TrackingLost => "No face / tracking lost — pulses paused",
                 crate::runtime::Status::Paused => {
                     "Paused — waiting for eligible play / League foreground"

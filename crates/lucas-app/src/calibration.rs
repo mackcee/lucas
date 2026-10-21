@@ -1,5 +1,9 @@
-//! Calibration schedule, in-memory observations and the M5.2 revalidation seam.
+//! Calibration schedule, in-memory observations and optional saved-fit testing.
 //! No camera frames or calibration observations are persisted by this module.
+//! Explicit numeric diagnostic export is isolated in calibration_diagnostics.
+mod readiness;
+pub use readiness::{CalibrationIssue, assess};
+
 use crate::{
     script::{Phase, Step, Target, TargetKind},
     timer::alignment_store::{AlignmentStore, Key},
@@ -15,6 +19,11 @@ use std::time::Duration;
 
 pub const SETTLE: Duration = Duration::from_millis(500);
 pub const TARGET_TIME: Duration = Duration::from_secs(2);
+/// Show the dot throughout settling, not a central countdown instead of it.
+/// Glance-test presentation remains separate and unchanged.
+pub fn visible_target(step: Step, focused: bool) -> Option<Target> {
+    (focused && matches!(step.phase, Phase::Countdown | Phase::Hold)).then_some(step.target)
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Fit,
@@ -68,30 +77,32 @@ impl CalibrationScript {
         let [l, t, r, b] = screen.minimap;
         let centre = [(l + r) / 2.0, (t + b) / 2.0];
         let beside = if settings.flipped { r + 0.04 } else { l - 0.04 };
-        for p in [
+        // Shift naturally from 18 seconds onward. Interleave both classes so
+        // movement is not accidentally a proxy for a minimap label. Include the
+        // two in-screen boundaries (horizontal neighbour and above), mirrored
+        // for a flipped map. Outer right/bottom targets would be off-monitor.
+        let elsewhere = [
             [0.5, 0.5],
             [0.5, 0.92],
             [0.92, 0.08],
             [centre[0], t - 0.04],
             [beside, centre[1]],
-        ] {
-            s.push(p, Stage::Fit, false);
-        }
-        // Five dense map positions, with the last two at a second head pose.
-        for (i, [x, y]) in [[0.3, 0.3], [0.7, 0.3], [0.5, 0.5], [0.3, 0.7], [0.7, 0.7]]
+        ];
+        for ([x, y], away) in [[0.3, 0.3], [0.7, 0.3], [0.5, 0.5], [0.3, 0.7], [0.7, 0.7]]
             .into_iter()
-            .enumerate()
+            .zip(elsewhere)
         {
-            s.push([l + (r - l) * x, t + (b - t) * y], Stage::Fit, i >= 3);
+            s.push([l + (r - l) * x, t + (b - t) * y], Stage::Fit, true);
+            s.push(away, Stage::Fit, true);
         }
-        // Four held-out target occurrences; never enter the fit matrix.
-        for (p, turned) in [
-            (centre, true),
-            ([0.5, 0.5], false),
-            ([l + (r - l) * 0.6, t + (b - t) * 0.6], false),
-            ([beside, centre[1]], false),
+        // Four held-out occurrences, including both near-boundary confusers.
+        for p in [
+            centre,
+            [centre[0], t - 0.04],
+            [l + (r - l) * 0.6, t + (b - t) * 0.6],
+            [beside, centre[1]],
         ] {
-            s.push(p, Stage::Validate, turned);
+            s.push(p, Stage::Validate, true);
         }
         if s.targets
             .iter()
@@ -170,8 +181,8 @@ pub struct Observation {
     pub target_id: u32,
     pub labelled: LabelledSample,
 }
-/// Called by the capture thread only after matching acquisition time to the
-/// displayed target, not a UI poll of its latest frame. Unknowns are retained.
+/// Called by the inference/recording worker only after matching acquisition time
+/// to the displayed target, not a UI poll of its latest frame. Unknowns are retained.
 pub fn observation(target: Target, sample: GazeSample) -> Observation {
     Observation {
         target_id: target.id,
@@ -236,8 +247,9 @@ pub fn fit_session(
     }
     calibration::fit(&train, &valid, script.screen(), FitOptions::default())
 }
-/// M5.2 calls this after presenting `CalibrationScript::quick`. This never
-/// adjusts weights/thresholds or silently promotes failed tracking to a check.
+/// Evaluate the optional test after presenting `CalibrationScript::quick`.
+/// This never adjusts weights/thresholds; its result is feedback, not permission
+/// to enable coaching or revoke a usable saved fit.
 pub fn quick_revalidate(
     model: &CalibrationModel,
     observations: &[Observation],
@@ -321,25 +333,25 @@ pub fn load(
     screen: &ScreenGeometry,
     minimap: [f64; 4],
 ) -> crate::trace::Result<Option<CalibrationModel>> {
-    let Some(saved) = store.load_calibration()? else {
-        return Ok(None);
-    };
-    let model = CalibrationModel::from_bytes(&saved.model)?;
-    if &saved.screen != screen
-        || model.screen().resolution != [screen.width, screen.height]
-        || model
-            .screen()
-            .minimap
-            .iter()
-            .zip(minimap)
-            .any(|(a, b)| !b.is_finite() || (a - b).abs() > 1e-9)
-        || !model
-            .validation()
-            .passes(model.target_false_positive_rate())
-    {
-        return Ok(None);
+    match load_explained(store, Some((screen, minimap))) {
+        Ok(model) => Ok(Some(model)),
+        Err(
+            CalibrationIssue::MissingProfile
+            | CalibrationIssue::GeometryChanged(_)
+            | CalibrationIssue::ValidationFailed(_),
+        ) => Ok(None),
+        Err(error) => Err(error.into()),
     }
-    Ok(Some(model))
+}
+
+pub fn load_explained(
+    store: &Store,
+    geometry: Option<(&ScreenGeometry, [f64; 4])>,
+) -> Result<CalibrationModel, CalibrationIssue> {
+    let saved = store
+        .load_calibration()
+        .map_err(|e| CalibrationIssue::ReadError(e.to_string()))?;
+    assess(saved, geometry)
 }
 
 #[cfg(test)]
@@ -380,6 +392,26 @@ mod tests {
                         .iter()
                         .any(|t| t.turned && t.target.kind == TargetKind::Minimap)
                 );
+                for kind in [TargetKind::Minimap, TargetKind::Elsewhere] {
+                    assert!(
+                        s.targets
+                            .iter()
+                            .any(|t| t.stage == Stage::Fit && t.turned && t.target.kind == kind)
+                    );
+                }
+                assert!(s.targets[..9].iter().all(|t| !t.turned));
+                let [l, top, right, _] = s.screen.minimap;
+                assert!(
+                    s.targets
+                        .iter()
+                        .any(|t| t.stage == Stage::Validate && t.target.position[1] < top)
+                );
+                assert!(s.targets.iter().any(|t| t.stage == Stage::Validate
+                    && if flipped {
+                        t.target.position[0] > right
+                    } else {
+                        t.target.position[0] < l
+                    }));
                 assert_eq!(s.at(Duration::ZERO).unwrap().0.phase, Phase::Countdown);
                 assert_eq!(s.at(SETTLE).unwrap().0.phase, Phase::Hold);
                 assert!(s.at(s.duration()).is_none());

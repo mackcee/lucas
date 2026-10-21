@@ -2,10 +2,12 @@ use crate::capture::{Diagnostic, Presentation, Worker};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, RichText, Stroke, Vec2, ViewportCommand};
 use lucas_app::{
     calibration::{self, CalibrationScript},
+    calibration_diagnostics,
+    runtime::calibration_status::CalibrationOutcome,
     script::{Phase, Script, Step, validate_duration},
     settings::MinimapSelection,
     timer::alignment_store::{self, AlignmentStore},
-    trace::{CameraInfo, EndReason, FEATURE_NAMES, Header},
+    trace::{CameraInfo, EndReason, Header, feature_names},
 };
 use std::{
     path::PathBuf,
@@ -25,7 +27,10 @@ fn trace_directory() -> Result<PathBuf, String> {
 pub fn run(seconds: u64, models: PathBuf) -> Result<(), String> {
     run_impl(seconds, models, None, None).map(|_| ())
 }
-pub fn run_calibration(models: PathBuf, quick_snapshot: Option<String>) -> Result<bool, String> {
+pub fn run_calibration(
+    models: PathBuf,
+    quick_snapshot: Option<String>,
+) -> Result<CalibrationOutcome, String> {
     run_impl(
         600,
         models,
@@ -42,9 +47,11 @@ fn run_impl(
     models: PathBuf,
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
-) -> Result<bool, String> {
-    let passed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let result = passed.clone();
+) -> Result<CalibrationOutcome, String> {
+    let outcome = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+        CalibrationOutcome::Cancelled as u8,
+    ));
+    let result = outcome.clone();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([820.0, 780.0])
@@ -85,7 +92,7 @@ fn run_impl(
                 calibration_result: None,
                 runtime_kind,
                 quick_snapshot,
-                runtime_passed: result,
+                runtime_outcome: result,
                 setup_camera: None,
                 setup_profile: None,
                 setup_cancelled: false,
@@ -95,7 +102,10 @@ fn run_impl(
         }),
     )
     .map_err(|e| e.to_string())?;
-    Ok(passed.load(std::sync::atomic::Ordering::Acquire))
+    Ok(CalibrationOutcome::from_code(Some(
+        outcome.load(std::sync::atomic::Ordering::Acquire) as i32
+    ))
+    .unwrap_or(CalibrationOutcome::Failed))
 }
 struct Camera {
     index: u32,
@@ -139,9 +149,9 @@ impl Schedule {
             Self::Glance(_) => "Look at the next dot",
             Self::Calibration(s) | Self::Quick(s, _) => {
                 if s.at(elapsed).is_some_and(|(_, t)| t.turned) {
-                    "Turn your head slightly; keep your eyes on the dot"
+                    "Shift naturally: lean, turn, move closer or farther; follow the dot"
                 } else {
-                    "Face forward comfortably; follow the dot with your eyes"
+                    "Sit comfortably; follow the dot. We will ask you to shift partway through"
                 }
             }
         }
@@ -151,6 +161,8 @@ struct Test {
     started: Instant,
     script: Schedule,
     screen: lucas_store::ScreenGeometry,
+    diagnostic_directory: Option<PathBuf>,
+    paint_bounds_px: Option<[f64; 4]>,
 }
 struct Pending {
     started: Instant,
@@ -173,7 +185,7 @@ pub(crate) struct DebugApp {
     calibration_result: Option<String>,
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
-    runtime_passed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    runtime_outcome: std::sync::Arc<std::sync::atomic::AtomicU8>,
     setup_camera: Option<u32>,
     pub(crate) setup_profile: Option<lucas_store::Calibration>,
     pub(crate) setup_cancelled: bool,
@@ -209,7 +221,9 @@ impl DebugApp {
             calibration_result: None,
             runtime_kind: Some(RunKind::Calibrate),
             quick_snapshot: None,
-            runtime_passed: Default::default(),
+            runtime_outcome: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                CalibrationOutcome::Cancelled as u8,
+            )),
             setup_camera: Some(camera),
             setup_profile: None,
             setup_cancelled: false,
@@ -223,8 +237,13 @@ impl DebugApp {
         Ok(app)
     }
     pub(crate) fn setup_passed(&self) -> bool {
-        self.runtime_passed
+        self.runtime_outcome
             .load(std::sync::atomic::Ordering::Acquire)
+            == CalibrationOutcome::Passed as u8
+    }
+    fn set_outcome(&self, outcome: CalibrationOutcome) {
+        self.runtime_outcome
+            .store(outcome as u8, std::sync::atomic::Ordering::Release);
     }
     fn refresh_cameras(&mut self) {
         match nokhwa::query(nokhwa::utils::ApiBackend::MediaFoundation) {
@@ -238,16 +257,55 @@ impl DebugApp {
         }
     }
     fn finish_test(&mut self, context: &egui::Context, reason: EndReason) {
-        let observations = if let Some(worker) = &self.worker {
+        self.set_outcome(if reason == EndReason::Completed {
+            CalibrationOutcome::Failed
+        } else {
+            CalibrationOutcome::Cancelled
+        });
+        let (observations, diagnostic_frames) = if let Some(worker) = &self.worker {
             let mut state = worker.shared.lock().unwrap();
             state.finish(reason);
-            state.take_calibration()
+            let frames = state.take_calibration_diagnostics();
+            (state.take_calibration(), frames)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
         if let Some(test) = self.test.take() {
+            let mut diagnostic_note = String::new();
+            let mut export = |script: &CalibrationScript,
+                              model: Option<&lucas_gaze::calibration::CalibrationModel>,
+                              error: Option<&str>| {
+                diagnostic_note = match calibration_diagnostics::export(
+                    test.diagnostic_directory.as_deref(),
+                    script,
+                    &observations,
+                    &diagnostic_frames,
+                    model,
+                    error,
+                    Some(&calibration_diagnostics::Display {
+                        monitor: test.screen.clone(),
+                        paint_bounds_px: test.paint_bounds_px,
+                    }),
+                ) {
+                    Ok(Some(path)) => format!(
+                        "\nNumeric calibration diagnostics saved: {}. No images; share only if you choose.",
+                        path.display()
+                    ),
+                    Ok(None) => String::new(),
+                    Err(e) => format!(
+                        "\nNumeric diagnostics could not be saved: {e}. Check the export folder; calibration result is unchanged."
+                    ),
+                };
+            };
             let result: lucas_app::trace::Result<Option<String>> = (|| {
                 if reason != EndReason::Completed {
+                    if let Schedule::Calibration(script) = &test.script {
+                        export(
+                            script,
+                            None,
+                            Some("calibration cancelled or tracking stopped"),
+                        );
+                    }
                     return Ok((!matches!(test.script, Schedule::Glance(_))).then(|| {
                         "Calibration cancelled. Your previous calibration is unchanged.".into()
                     }));
@@ -255,7 +313,10 @@ impl DebugApp {
                 let (model, validation, save) = match &test.script {
                     Schedule::Glance(_) => return Ok(None),
                     Schedule::Calibration(script) => {
-                        let model = calibration::fit_session(script, &observations)?;
+                        let fitted = calibration::fit_session(script, &observations);
+                        let error = fitted.as_ref().err().map(|e| e.to_string());
+                        export(script, fitted.as_ref().ok(), error.as_deref());
+                        let model = fitted?;
                         let validation = model.validation();
                         (model, validation, true)
                     }
@@ -269,7 +330,7 @@ impl DebugApp {
                 if pass && save {
                     let profile = calibration::profile(
                         &model,
-                        test.screen,
+                        test.screen.clone(),
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)?
                             .as_millis()
@@ -286,8 +347,7 @@ impl DebugApp {
                     }
                 }
                 if pass && self.runtime_kind.is_some() {
-                    self.runtime_passed
-                        .store(true, std::sync::atomic::Ordering::Release);
+                    self.set_outcome(CalibrationOutcome::Passed);
                     if self.setup_camera.is_none() {
                         context.send_viewport_cmd(ViewportCommand::Close);
                     }
@@ -303,12 +363,16 @@ impl DebugApp {
                     validation.true_positive_rate * 100.0,
                     validation.false_positive_rate * 100.0,
                     validation.usable_fraction * 100.0,
-                    if pass && save {
+                    if pass && save && test.diagnostic_directory.is_some() {
+                        "Calibration saved locally. Numeric diagnostic export requested; no images."
+                    } else if pass && save {
                         "Calibration saved locally. No images or training samples saved."
                     } else if pass {
-                        "Ready for this geometry. Saved weights unchanged."
+                        "Test passed. Saved calibration unchanged."
+                    } else if !save {
+                        "Test did not pass. Saved calibration unchanged; recalibrate if tracking seems wrong."
                     } else {
-                        "Not saved. Add a front light, sit comfortably, then calibrate again."
+                        "Calibration not saved. Check target visibility, screen/minimap alignment and tracking quality. Numeric diagnostics can help distinguish decision overlap from tracking loss."
                     }
                 )))
             })();
@@ -321,10 +385,13 @@ impl DebugApp {
                     ))
                 }
             }
+            if let Some(text) = &mut self.calibration_result {
+                text.push_str(&diagnostic_note);
+            }
         }
         if self.runtime_kind == Some(RunKind::Quick) {
-            // A failed or cancelled quick check returns to the tray immediately;
-            // it cannot keep retrying stale weights while coaching is enabled.
+            // Optional tests return their result to the tray. They never save
+            // weights or decide whether the existing calibration remains usable.
             context.send_viewport_cmd(ViewportCommand::Close);
         }
         self.pending = None;
@@ -335,6 +402,7 @@ impl DebugApp {
         context.set_cursor_icon(egui::CursorIcon::Default);
     }
     fn arm_test(&mut self, requested: RunKind) {
+        self.set_outcome(CalibrationOutcome::Cancelled);
         self.requested = requested;
         self.calibration_result = None;
         self.error = None;
@@ -363,6 +431,7 @@ impl DebugApp {
         if pending.started.elapsed() > Duration::from_secs(5) {
             self.error = Some("Could not enter fullscreen on the main monitor. Move LUCAS to the main monitor and try again.".into());
             self.finish_test(context, EndReason::Cancelled);
+            self.set_outcome(CalibrationOutcome::Failed);
             return;
         }
         let scale = context.pixels_per_point();
@@ -416,7 +485,10 @@ impl DebugApp {
                         .and_then(|s| s.load_settings())
                         .map_err(|e| e.to_string())?;
                     if self.cameras[self.selected].index != settings.camera_index {
-                        return Err("Quick check must use the calibrated camera; select it or run full calibration.".into());
+                        return Err(
+                            "Test gaze must use the calibrated camera; select it or recalibrate."
+                                .into(),
+                        );
                     }
                     let model = calibration::load(&lucas_store::Store::open().map_err(|e|e.to_string())?, &screen, script.screen().minimap)
                         .map_err(|e|e.to_string())?.ok_or("No passing calibration for this screen/minimap. Run full calibration first.")?;
@@ -426,23 +498,35 @@ impl DebugApp {
                             self.cameras[self.selected].index,
                             expected,
                         )
-                        .map_err(|e| e.to_string())?;
+                        .map_err(|e| {
+                            self.set_outcome(CalibrationOutcome::Changed);
+                            e.to_string()
+                        })?;
                     }
                     Schedule::Quick(CalibrationScript::quick(&model), Box::new(model))
                 } else {
                     Schedule::Calibration(script)
                 };
-                state.begin_calibration(started, schedule.duration());
+                let diagnostic_directory = (self.requested == RunKind::Calibrate)
+                    .then(calibration_diagnostics::directory_from_env)
+                    .flatten();
+                state.begin_calibration(
+                    started,
+                    schedule.duration(),
+                    diagnostic_directory.is_some(),
+                );
                 return Ok(Test {
                     started,
                     script: schedule,
                     screen,
+                    diagnostic_directory,
+                    paint_bounds_px: None,
                 });
             }
             let script = Script::new(self.seconds, self.monitor.resolution, minimap.settings())
                 .map_err(str::to_owned)?;
             let header = Header {
-                schema_version: 1,
+                schema_version: 2,
                 app_version: env!("CARGO_PKG_VERSION").into(),
                 started_unix_ms: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -468,6 +552,8 @@ impl DebugApp {
                 started,
                 script: Schedule::Glance(script),
                 screen,
+                diagnostic_directory: None,
+                paint_bounds_px: None,
             })
         })();
         match result {
@@ -476,8 +562,18 @@ impl DebugApp {
                 self.pending = None;
             }
             Err(error) => {
+                let outcome = if self
+                    .runtime_outcome
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    == CalibrationOutcome::Changed as u8
+                {
+                    CalibrationOutcome::Changed
+                } else {
+                    CalibrationOutcome::Failed
+                };
                 self.error = Some(error);
                 self.finish_test(context, EndReason::Cancelled);
+                self.set_outcome(outcome);
             }
         }
     }
@@ -488,6 +584,7 @@ impl DebugApp {
         if self.window.fullscreen().is_none() || [actual.width, actual.height] != expected {
             self.error = Some("Display geometry changed. Start a new test or calibration.".into());
             self.finish_test(context, EndReason::Cancelled);
+            self.set_outcome(CalibrationOutcome::Changed);
             return;
         }
         let test = self.test.as_ref().unwrap();
@@ -510,6 +607,9 @@ impl DebugApp {
         };
         if cancelled || failed {
             self.finish_test(context, EndReason::Cancelled);
+            if failed && !cancelled {
+                self.set_outcome(CalibrationOutcome::Failed);
+            }
             return;
         }
         let phase = if focused {
@@ -517,7 +617,11 @@ impl DebugApp {
         } else {
             Phase::Unfocused
         };
-        let target = (phase == Phase::Hold).then_some(step.target);
+        let target = if is_calibration {
+            calibration::visible_target(step, focused)
+        } else {
+            (phase == Phase::Hold).then_some(step.target)
+        };
         let shown = Presentation { phase, target };
         self.worker
             .as_ref()
@@ -526,12 +630,18 @@ impl DebugApp {
             .lock()
             .unwrap()
             .present(Instant::now(), shown);
+        let mut paint_bounds_px = None;
         // Fixed background brightness across countdown and target holds. No camera
         // preview, animated status meter or gaze marker competes with the target.
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(Color32::from_gray(74)))
             .show(root, |ui| {
                 let rect = ui.max_rect();
+                let scale = f64::from(context.pixels_per_point());
+                paint_bounds_px = Some(
+                    [rect.left(), rect.top(), rect.right(), rect.bottom()]
+                        .map(|x| f64::from(x) * scale),
+                );
                 let painter = ui.painter();
                 if let Some(target) = target {
                     paint_target(painter, rect, target.position);
@@ -612,6 +722,9 @@ impl DebugApp {
                     Color32::from_gray(220),
                 );
             });
+        if let Some(test) = &mut self.test {
+            test.paint_bounds_px = paint_bounds_px;
+        }
         context.set_cursor_icon(egui::CursorIcon::None);
     }
     fn show_debug(&mut self, root: &mut egui::Ui) {
@@ -634,8 +747,15 @@ impl DebugApp {
                 if self.setup_camera.is_some() && ui.button("Back to setup").clicked() {
                     self.setup_cancelled = true;
                 }
-                ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Quick check before play", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
-                ui.label(if self.runtime_kind.is_some() { "Connect your calibrated camera, then start below. Coaching stays paused until validation passes. Close this window to cancel." } else { "Check camera placement and lighting before recording your glance test." });
+                ui.heading(match self.runtime_kind { Some(RunKind::Quick) => "Test gaze (optional)", Some(_) => "Calibrate your minimap gaze", None => "Gaze debug" });
+                ui.label(match self.runtime_kind {
+                    Some(RunKind::Quick) => "Connect your calibrated camera, then start below. Coaching pauses while this window is open. The result never replaces or revokes your saved calibration.",
+                    Some(_) => "Connect your camera, then start below. Only a passing calibration is saved. Coaching pauses while this window is open; close it to cancel.",
+                    None => "Check camera placement and lighting before recording your glance test.",
+                });
+                if let Some(folder) = calibration_diagnostics::directory_from_env() {
+                    ui.label(format!("Calibration diagnostics enabled: each full calibration in this session saves gaze/pose numbers to {}. No images or automatic uploads.", folder.display()));
+                }
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     ui.add_enabled_ui(!running && self.pending.is_none() && self.setup_camera.is_none(), |ui| {
@@ -653,6 +773,11 @@ impl DebugApp {
                     if ui.add_enabled(running, egui::Button::new("Stop camera")).clicked() { self.worker.as_ref().unwrap().stop(); }
                     ui.label("1280 × 720 · MJPEG · 30 fps requested");
                 });
+                if let Some(source) = self.worker.as_ref().and_then(|w| w.shared.lock().unwrap().source.clone()) {
+                    ui.label(source);
+                } else {
+                    ui.label("Gaze source: UniGaze when installed; otherwise MediaPipe. Set LUCAS_GAZE_SOURCE=mediapipe before launch to select the fallback.");
+                }
                 if self.cameras.is_empty() { ui.label("Connect a webcam and allow desktop apps under Windows Settings → Privacy → Camera."); }
                 ui.add_space(12.0);
                 let fresh = running && latest.is_some_and(|d| d.received.elapsed() < Duration::from_secs(1));
@@ -663,24 +788,30 @@ impl DebugApp {
                 }
                 ui.add_space(16.0);
                 ui.separator();
-                ui.heading("Calibrate your minimap gaze");
-                ui.label("About 46 seconds. Follow the dots, then turn your head slightly when asked. Four final targets check the fit. Calibrate in your usual playing position, with glasses if you wear them.");
-                ui.horizontal_wrapped(|ui| {
-                    for (label,value) in ["Screen width (mm)","Height (mm)","Assumed distance (mm)"].into_iter().zip(&mut self.measurements) {
-                        ui.horizontal(|ui| { ui.label(label); ui.add(egui::DragValue::new(value).range(100.0..=3000.0)); });
-                    }
-                });
-                ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
-                ui.label("Only weights and validation results are saved. Calibration samples stay in memory; the camera never saves images.");
+                if self.runtime_kind == Some(RunKind::Quick) {
+                    ui.label("Follow the minimap and centre dots. This four-second test checks your saved calibration without replacing it.");
+                } else {
+                    ui.heading("Calibrate your minimap gaze");
+                    ui.label("About 46 seconds. Follow the dots. Partway through, lean, turn and move a little closer or farther as you normally play. Keep following the dots as you move. Four final targets check the fit, including points just outside the minimap. Use your usual glasses and lighting.");
+                    ui.horizontal_wrapped(|ui| {
+                        for (label,value) in ["Screen width (mm)","Height (mm)","Assumed distance (mm)"].into_iter().zip(&mut self.measurements) {
+                            ui.horizontal(|ui| { ui.label(label); ui.add(egui::DragValue::new(value).range(100.0..=3000.0)); });
+                        }
+                    });
+                    ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
+                    ui.label("By default, only weights and validation results are saved; calibration samples stay in memory. If you opted into local numeric diagnostic exports, see the notice above. No images are saved and nothing is uploaded.");
+                }
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(fresh && self.pending.is_none() && self.runtime_kind != Some(RunKind::Quick), egui::Button::new("Start calibration")).clicked() { self.arm_test(RunKind::Calibrate); }
-                    if ui.add_enabled(fresh && self.pending.is_none() && self.runtime_kind != Some(RunKind::Calibrate), egui::Button::new("Quick check · 4 seconds")).clicked() { self.arm_test(RunKind::Quick); }
+                    if self.runtime_kind != Some(RunKind::Quick)
+                        && ui.add_enabled(fresh && self.pending.is_none(), egui::Button::new("Start calibration")).clicked() { self.arm_test(RunKind::Calibrate); }
+                    if self.runtime_kind != Some(RunKind::Calibrate)
+                        && ui.add_enabled(fresh && self.pending.is_none(), egui::Button::new("Test gaze · 4 seconds")).clicked() { self.arm_test(RunKind::Quick); }
                 });
                 if let Some(result) = &self.calibration_result { ui.add_space(8.0); ui.label(result); }
                 if self.runtime_kind.is_some() { return; }
                 ui.add_space(16.0); ui.separator();
                 ui.heading("Glance test");
-                ui.label("Follow each dot with your eyes; keep your head comfortable and mostly still. Look at the countdown between dots. The main monitor will fill the screen. Esc saves a partial test.");
+                ui.label("Follow each dot with your eyes; move naturally within the range you calibrated. Look at the countdown between dots. The main monitor will fill the screen. Esc saves a partial test.");
                 ui.horizontal(|ui| {
                     ui.label("Duration (seconds)");
                     ui.add(egui::DragValue::new(&mut self.seconds).range(60..=600).speed(6));
@@ -730,11 +861,17 @@ impl eframe::App for DebugApp {
     fn ui(&mut self, root: &mut egui::Ui, _: &mut eframe::Frame) {
         let context = &root.ctx().clone();
         context.request_repaint_after(Duration::from_millis(33));
-        if context.input(|i| i.viewport().close_requested())
-            && let Some(worker) = &self.worker
-        {
-            worker.shared.lock().unwrap().finish(EndReason::Cancelled);
-            worker.stop();
+        if context.input(|i| i.viewport().close_requested()) {
+            if self.test.is_some() || self.pending.is_some() {
+                self.finish_test(context, EndReason::Cancelled);
+            }
+            if let Some(worker) = &self.worker {
+                worker.shared.lock().unwrap().finish(EndReason::Cancelled);
+                worker.stop();
+            }
+            // Do not classify our intentional worker stop as tracking failure,
+            // or replace an already-completed failed result with cancellation.
+            return;
         }
         if self.pending.is_some() && context.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.finish_test(context, EndReason::Cancelled);
@@ -781,7 +918,10 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
         } else {
             "Eyes unknown / occluded"
         });
-        ui.label(format!("{:.1} fps · {:.2} ms CPU/frame", d.fps, d.cpu_ms));
+        ui.label(format!(
+            "{:.1} fps · {:.2} ms Rust inference CPU/frame",
+            d.fps, d.cpu_ms
+        ));
     });
     ui.add(egui::ProgressBar::new(d.sample.quality).text(format!(
         "Tracking quality {:.0}% · heuristic, not accuracy",
@@ -793,7 +933,7 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
             egui::Grid::new("feature-values")
                 .striped(true)
                 .show(ui, |ui| {
-                    for (i, name) in FEATURE_NAMES.iter().enumerate() {
+                    for (i, name) in feature_names(d.feature_kind).iter().enumerate() {
                         ui.label(*name);
                         ui.monospace(d.raw.map_or_else(|| "—".into(), |f| format!("{:.4}", f[i])));
                         ui.end_row();
@@ -802,7 +942,7 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
         });
         ui.add_space(20.0);
         ui.vertical(|ui| {
-            ui.label("Coarse eye direction");
+            ui.label("Coarse camera-space direction");
             let (rect, _) = ui.allocate_exact_size(Vec2::new(200.0, 150.0), egui::Sense::hover());
             let p = ui.painter();
             p.rect_stroke(
@@ -820,8 +960,16 @@ fn diagnostics(ui: &mut egui::Ui, d: Diagnostic) {
                 Stroke::new(1.0, Color32::DARK_GRAY),
             );
             if let Some(f) = d.raw {
-                let x = ((f[0] + f[3]) / 2.0).clamp(0.0, 1.0);
-                let y = ((f[1] + f[4]) / 2.0).clamp(0.0, 1.0);
+                let (x, y) = match d.feature_kind {
+                    lucas_gaze::features::FeatureKind::MediaPipe => (
+                        ((f[0] + f[3]) / 2.0).clamp(0.0, 1.0),
+                        ((f[1] + f[4]) / 2.0).clamp(0.0, 1.0),
+                    ),
+                    lucas_gaze::features::FeatureKind::UniGaze => (
+                        (0.5 + f[1] / std::f32::consts::PI).clamp(0.0, 1.0),
+                        (0.5 + f[0] / std::f32::consts::PI).clamp(0.0, 1.0),
+                    ),
+                };
                 p.circle_filled(
                     Pos2::new(
                         rect.left() + x * rect.width(),

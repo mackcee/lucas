@@ -47,6 +47,13 @@ Diagnostics use `lucas-game` to locate minimap settings and make no network requ
 `lucas --calibrate` and follow the [calibration guide](crates/lucas-app/README.md#in-app-calibration).
 For offline recording evaluation, see the [G2 evaluator](xtask/README.md#g2-calibration-and-glance-evaluation).
 
+**UniGaze-H CUDA tracking** is now available with the robust SFD/FAN face frontend.
+It becomes the default after the [one-time NVIDIA setup](docs/testing-on-windows.md#one-time-unigaze-setup-nvidia-cuda);
+MediaPipe remains selectable. Calibration asks for natural movement and uses a
+rectangular minimap decision. See the [target-PC results](models/unigaze/README.md#target-pc-headless-verification-2026-10-20)
+for calibration evidence and remaining accuracy limits; adding a stronger model
+is not a claim that the G2 accuracy gate is met.
+
 The application targets **Windows only**. League must run in **Borderless or
 Windowed mode**, not exclusive fullscreen. The workspace and gaze fixture tests
 can also be built and checked on Linux. Builds will initially be unsigned.
@@ -56,16 +63,21 @@ can also be built and checked on Linux. Builds will initially be unsigned.
 1. **Download** the Windows build from [GitHub Actions](https://github.com/mackcee/lucas/actions)
    (see the [download steps](docs/testing-on-windows.md)). Extract the whole archive,
    keeping `models/` and the runtime DLLs beside `lucas.exe`. Builds are unsigned.
+   For NVIDIA gaze tracking, run the [UniGaze setup and headless GPU check](docs/testing-on-windows.md#one-time-unigaze-setup-nvidia-cuda) before calibrating.
 2. **Run `lucas.exe`.** First-run setup walks through camera choice and live tracking
    quality, a skippable Borderless check, calibration, next-game minimap alignment
    and a starting level. Frames are never stored; nothing leaves your PC. Closing
    before Finish discards the draft; reopen **First-run setup…** from the
    notification-area icon to start again. Finish returns to the tray. If Finish
    fails, retry while the window is open (see [save behavior](crates/lucas-app/src/runtime/README.md#before-play)).
-   In your next game, choose **Align minimap…** and follow the
+   **Calibrate once, then play.** LUCAS reuses a passing calibration automatically
+   in every game with the same screen and minimap geometry; there is no per-game
+   quick check. If needed, use **Align minimap…** and the
    [alignment instructions](docs/testing-on-windows.md#one-time-alignment-repeat-whenever-a-patch-moves-the-hud),
-   then complete the tray's quick gaze check before play. Changed geometry may need
-   explicit recalibration.
+   then recalibrate once for the changed layout. **Test gaze** is optional: failing
+   or cancelling it does not discard a valid calibration. If calibration really
+   is missing or mismatched, the tray gives one reason, with numbers under
+   **Calibration details**.
 3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
    move through 8 → 6 → 5 s. Fade levels keep the 5 s goal but delay and soften the
    help, make it intermittent, then turn it off. A saved level applies **next game**,
@@ -95,18 +107,23 @@ The opt-in debug glance test additionally
 stores numeric eye/head features, quality, target labels and timestamps, plus a
 camera/monitor metadata header and your lighting note. **No images are stored.**
 See the [recording guide](docs/testing-on-windows.md#record-the-test-about-10-minutes)
-for local trace location, deletion and explicit sharing.
+for local trace location, deletion and explicit sharing. Full calibration also
+supports a separate [explicit numeric diagnostic export](docs/testing-on-windows.md#one-run-numeric-calibration-diagnostics-explicit-opt-in).
 The tray persists alignment profiles and user-requested numeric geometry reports
 in `%LOCALAPPDATA%\lucas`. Its default gate polls the local game API; window-only
 mode disables polling (an already-running request may finish).
-Developer build and dependency-check tools may access package registries and
-advisory databases.
+The explicit one-time UniGaze installer downloads published models and dependencies;
+it never opens the camera. App inference remains offline in a LUCAS-owned local
+process. Developer build and dependency-check tools may access package registries
+and advisory databases.
 
 ## Build and check
 
 Install [Rust via rustup](https://rustup.rs/), then run from the repository root.
 The toolchain and required components are pinned in
-[`rust-toolchain.toml`](rust-toolchain.toml).
+[`rust-toolchain.toml`](rust-toolchain.toml). The CPU-only UniGaze setup/protocol
+checks also require Python 3.11 or newer; on Unix, the Rust IPC tests invoke
+`python3` from PATH. No Python ML packages or GPU are needed for these checks.
 
 ```sh
 cargo build --workspace
@@ -123,6 +140,7 @@ cargo xtask replay path/to/trace.jsonl
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+python3 -m unittest discover -s models/unigaze -p 'test_*.py'
 
 cargo install cargo-deny --locked
 cargo deny check
@@ -162,10 +180,10 @@ metric interpretation and integration.
 | `xtask` | Synthetic-player simulator, trace replay and G2 evaluation, offline model conversion and hash verification |
 
 These are responsibility boundaries; implementation status is described
-[above](#status). The gaze library uses hash-pinned MediaPipe models through ONNX
-Runtime behind a `GazeSource` trait; see
-[`models/README.md`](models/README.md) for attribution and development-only
-conversion commands. Models are never downloaded at application runtime.
+[above](#status). The gaze library exposes a `GazeSource` boundary for the optional
+hash-pinned UniGaze CUDA sidecar and the MediaPipe/ONNX Runtime fallback. See
+[`models/README.md`](models/README.md) for attribution, setup and conversion
+commands. Models are never downloaded at application runtime.
 
 ## License
 

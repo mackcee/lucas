@@ -61,6 +61,43 @@ fn help_and_bad_options_never_open_a_camera_or_window() {
 }
 
 #[test]
+fn gaze_model_check_is_headless_and_fails_specifically_without_installation() {
+    let dir = tempfile::tempdir().unwrap();
+    let help = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8(help.stdout)
+            .unwrap()
+            .contains("--check-gaze-model")
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .arg("--check-gaze-model")
+        .arg("--models")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("UniGaze is not installed")
+    );
+    assert!(output.stdout.is_empty());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
+        .args(["--check-gaze-model", "--seconds", "60"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("Usage: lucas --check-gaze-model")
+    );
+}
+#[test]
 fn prints_version() {
     let output = Command::new(env!("CARGO_BIN_EXE_lucas"))
         .arg("--version")

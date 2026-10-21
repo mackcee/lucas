@@ -22,12 +22,12 @@ pub struct HeadPose {
     pub relative_distance: f32,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GazeFeatures {
+pub struct LandmarkFeatures {
     /// Anatomical right eye (image-left), then anatomical left eye (image-right).
     pub eyes: [EyeFeatures; 2],
     pub head: HeadPose,
 }
-impl GazeFeatures {
+impl LandmarkFeatures {
     pub const COUNT: usize = 10;
     pub fn as_array(self) -> [f32; Self::COUNT] {
         [
@@ -67,6 +67,52 @@ impl GazeFeatures {
     }
 }
 
+/// Feature identity is persisted with calibration and traces; models are never
+/// interchangeable. UniGaze angles are camera-space radians, not iris ratios.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureKind {
+    #[default]
+    MediaPipe,
+    UniGaze,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GazeFeatures {
+    Landmarks(LandmarkFeatures),
+    /// pitch, yaw, right/left aperture, head pitch/yaw/roll, face x/y/z (mm).
+    UniGaze([f32; 10]),
+}
+impl GazeFeatures {
+    pub const COUNT: usize = 10;
+    pub fn kind(self) -> FeatureKind {
+        match self {
+            Self::Landmarks(_) => FeatureKind::MediaPipe,
+            Self::UniGaze(_) => FeatureKind::UniGaze,
+        }
+    }
+    pub fn as_array(self) -> [f32; 10] {
+        match self {
+            Self::Landmarks(f) => f.as_array(),
+            Self::UniGaze(v) => v,
+        }
+    }
+    pub fn from_array(v: [f32; 10]) -> Self {
+        Self::Landmarks(LandmarkFeatures::from_array(v))
+    }
+    pub fn from_array_for(kind: FeatureKind, v: [f32; 10]) -> Self {
+        match kind {
+            FeatureKind::MediaPipe => Self::from_array(v),
+            FeatureKind::UniGaze => Self::UniGaze(v),
+        }
+    }
+    pub fn landmarks_mut(&mut self) -> Option<&mut LandmarkFeatures> {
+        match self {
+            Self::Landmarks(f) => Some(f),
+            Self::UniGaze(_) => None,
+        }
+    }
+}
+
 /// Returns None for closed/occluded eyes, invalid geometry, out-of-frame eyes,
 /// or a poor fit. Quality is a [0,1] heuristic, NOT calibrated accuracy.
 pub fn extract(face: &FaceLandmarks) -> Option<(GazeFeatures, f32)> {
@@ -99,7 +145,10 @@ pub fn extract(face: &FaceLandmarks) -> Option<(GazeFeatures, f32)> {
     if quality <= 0.0 {
         return None;
     }
-    Some((GazeFeatures { eyes, head }, quality))
+    Some((
+        GazeFeatures::Landmarks(LandmarkFeatures { eyes, head }),
+        quality,
+    ))
 }
 fn eye(points: &[Landmark; 478], indices: [usize; 5], w: u32, h: u32) -> Option<EyeFeatures> {
     let p = indices.map(|i| points[i]);

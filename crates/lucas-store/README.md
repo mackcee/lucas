@@ -65,6 +65,9 @@ the database and SQLite sidecars, settings, tray alignment profiles
 interrupted atomic writes with the private `.lucas-write-` prefix, and the `traces`
 and `reports` directories. It leaves the folder itself and unrelated files intact.
 Directory symlinks are removed, not followed. No files are sent elsewhere.
+Explicit numeric calibration exports outside these paths, such as the
+`calibration-diagnostics` folder beside the app, are not removed by **Delete all
+data**. Delete those exports separately from the directory you selected.
 
 The caller **must close the tray (gaze or timer mode), stop other calibration,
 trace/report writers, and release every other database handle before deletion**.

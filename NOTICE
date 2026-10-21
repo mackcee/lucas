@@ -29,9 +29,24 @@ graphs (Copyright 2023-2025 The MediaPipe Authors). The seven canonical-face
 vertices in crates/lucas-gaze/src/features.rs are adapted from MediaPipe's
 canonical_face_model.obj (Copyright 2020 The MediaPipe Authors).
 
-The test-only portrait.jpg is MediaPipe's Apache-2.0 test asset from
+The test/optional headless-diagnostic portrait.jpg is MediaPipe's Apache-2.0 test asset from
 https://storage.googleapis.com/mediapipe-assets/portrait.jpg . It is not a user
 webcam recording. Its provenance and SHA-256 are in the fixture README.
 
 These third-party materials remain Apache-2.0 and are not relicensed under
 LUCAS's MIT option. No upstream NOTICE file is present in the model archive.
+
+Optional UniGaze downloads (not included in this distribution)
+-------------------------------------------------------------
+The explicit setup script downloads UniGaze-H joint weights and official code
+from https://github.com/ut-vision/UniGaze at revision
+9c240fbe33f3d6146970a77b7c8fa06a7e60019e. Authors: Jiawei Qin, Xucong Zhang,
+Yusuke Sugano. UniGaze: Towards Universal Gaze Estimation via Large-scale
+Pre-Training, WACV 2026. The source archive retains its MG-NC-RAI-2.0 license.
+The imported normalization module retains CC BY-NC-SA 4.0 and cites:
+Xucong Zhang, Yusuke Sugano, Andreas Bulling, Revisiting Data Normalization for
+Appearance-Based Gaze Estimation, ETRA 2018.
+The SFD/FAN frontend is provided by https://github.com/1adrianb/face-alignment.
+Downloaded source, weights, CUDA/PyTorch dependencies and their upstream licenses
+are not relicensed under LUCAS's MIT option. See models/unigaze/README.md and its
+asset/dependency locks for provenance and the local adapter's changes.

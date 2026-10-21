@@ -1,12 +1,12 @@
 //! Per-user calibration. Pure deterministic fitting; no camera or persistence I/O.
 //! Training and threshold-validation observations must come from distinct targets.
-use crate::{GazeFeatures, GazeSample};
+use crate::{GazeFeatures, GazeSample, features::FeatureKind};
 use lucas_geometry::{Rect, ViewingGeometry, gaze_zone};
 use nalgebra::{SMatrix, SVector, Vector3};
 
 const N: usize = GazeFeatures::COUNT;
 const P: usize = N + 1;
-const MAGIC: &[u8; 8] = b"LUCASC01";
+const MAGIC: &[u8; 8] = b"LUCASC02";
 pub const MINIMUM_QUALITY: f32 = 0.5;
 pub type Result<T> = std::result::Result<T, CalibrationError>;
 
@@ -129,7 +129,9 @@ impl Validation {
 pub struct CalibrationModel {
     mean: [f64; N],
     scale: [f64; N],
-    logistic: [f64; P],
+    /// Per-axis training residual scales for the four-sided rectangular score.
+    residual: [f64; 2],
+    kind: FeatureKind,
     ridge: [[f64; P]; 2],
     screen: Screen,
     threshold: f64,
@@ -148,20 +150,35 @@ pub fn usable(sample: GazeSample) -> Option<GazeFeatures> {
     let f = sample.features?;
     if !(MINIMUM_QUALITY..=1.0).contains(&sample.quality)
         || f.as_array().iter().any(|v| !v.is_finite())
-        || f.eyes.iter().any(|e| {
-            !(0.06..0.65).contains(&e.aperture)
-                || !(-0.25..=1.25).contains(&e.horizontal)
-                || !(-0.5..=1.5).contains(&e.vertical)
-        })
-        || f.head.yaw.abs() > 1.2
-        || f.head.pitch.abs() > 1.2
-        || f.head.relative_distance <= 0.0
+        || match f {
+            GazeFeatures::Landmarks(f) => {
+                f.eyes.iter().any(|e| {
+                    !(0.06..0.65).contains(&e.aperture)
+                        || !(-0.25..=1.25).contains(&e.horizontal)
+                        || !(-0.5..=1.5).contains(&e.vertical)
+                }) || f.head.yaw.abs() > 1.2
+                    || f.head.pitch.abs() > 1.2
+                    || f.head.relative_distance <= 0.0
+            }
+            GazeFeatures::UniGaze(v) => {
+                v[0].abs() > 1.57
+                    || v[1].abs() > 1.57
+                    || !(0.06..0.65).contains(&v[2])
+                    || !(0.06..0.65).contains(&v[3])
+                    || v[4].abs() > 1.4
+                    || v[5].abs() > 1.4
+                    || v[9] <= 0.0
+            }
+        }
     {
         return None;
     }
     Some(f)
 }
 impl CalibrationModel {
+    pub fn feature_kind(&self) -> FeatureKind {
+        self.kind
+    }
     pub fn screen(&self) -> Screen {
         self.screen
     }
@@ -184,6 +201,10 @@ impl CalibrationModel {
         SVector::from_fn(|i, _| {
             if i == N {
                 1.0
+            } else if self.kind == FeatureKind::UniGaze && i >= 2 {
+                // Two-angle personal readout. Pose/apertures guard quality but
+                // must not fit a spurious pose-to-target shortcut in 46 seconds.
+                0.0
             } else {
                 (f64::from(a[i]) - self.mean[i]) / self.scale[i]
             }
@@ -193,27 +214,51 @@ impl CalibrationModel {
         let x = self.vector(f);
         self.ridge.map(|w| SVector::from(w).dot(&x))
     }
-    /// None = unknown (tracking loss, blink, low quality, off-screen estimate).
-    /// The inflated zone is a spatial guard, never an independent positive check.
-    pub fn predict(&self, sample: GazeSample) -> Option<Prediction> {
+    /// Numeric diagnostics may inspect off-monitor estimates without promoting
+    /// them to known gaze. Prediction/validation still reject those estimates.
+    pub fn screen_estimate(&self, sample: GazeSample) -> Option<[f64; 2]> {
         let f = usable(sample)?;
+        if f.kind() != self.kind {
+            return None;
+        }
         let point = self.point(f);
+        point.iter().all(|x| x.is_finite()).then_some(point)
+    }
+    pub fn residual_scales(&self) -> [f64; 2] {
+        self.residual
+    }
+    /// The effective entry rectangle after the selected probability threshold.
+    /// A high score threshold erodes all four edges; None denotes an empty zone.
+    pub fn decision_rectangle(&self) -> Option<[f64; 4]> {
+        let logit = (self.threshold / (1.0 - self.threshold)).ln();
+        let [dx, dy] = self.residual.map(|s| s * logit);
+        let [l, t, r, b] = self.screen.minimap;
+        let result = [l + dx, t + dy, r - dx, b - dy];
+        (result.iter().all(|x| x.is_finite()) && result[0] < result[2] && result[1] < result[3])
+            .then_some(result)
+    }
+    /// None = unknown (tracking loss, blink, low quality, off-screen estimate).
+    /// All four edges of the actual minimap bound positive scores. Error-inflated
+    /// geometry remains diagnostic only, never an independent positive check.
+    pub fn predict(&self, sample: GazeSample) -> Option<Prediction> {
+        let point = self.screen_estimate(sample)?;
         if point
             .iter()
             .any(|x| !x.is_finite() || !(0.0..=1.0).contains(x))
         {
             return None;
         }
-        let zone = self.inflated_zone();
-        let inside = point[0] >= zone[0]
-            && point[0] <= zone[2]
-            && point[1] >= zone[1]
-            && point[1] <= zone[3];
-        let probability = if inside {
-            sigmoid(SVector::from(self.logistic).dot(&self.vector(f)))
-        } else {
-            0.0
-        };
+        let [l, t, r, b] = self.screen.minimap;
+        // All four sides must agree: above/right is not a minimap look just
+        // because a half-plane classifier extrapolates a positive score.
+        let probability = [
+            sigmoid((point[0] - l) / self.residual[0]),
+            sigmoid((r - point[0]) / self.residual[0]),
+            sigmoid((point[1] - t) / self.residual[1]),
+            sigmoid((b - point[1]) / self.residual[1]),
+        ]
+        .into_iter()
+        .fold(1.0, f64::min);
         Some(Prediction {
             probability,
             screen: point,
@@ -221,6 +266,15 @@ impl CalibrationModel {
     }
     pub fn validate_samples(&self, samples: &[LabelledSample]) -> Result<Validation> {
         check_labels(samples)?;
+        if samples
+            .iter()
+            .filter_map(|s| s.sample.features)
+            .any(|f| f.kind() != self.kind)
+        {
+            return Err(CalibrationError(
+                "gaze source changed; recalibrate with the selected source",
+            ));
+        }
         let (mut positive, mut negative, mut tp, mut fp, mut valid, mut known, mut error) =
             (0, 0, 0, 0, 0, 0, 0.0);
         for s in samples {
@@ -259,18 +313,20 @@ impl CalibrationModel {
         })
     }
     /// Fixed little-endian format, versioned by magic. Only weights, geometry and
-    /// validation aggregates; no per-frame features. 553 bytes in version 1.
+    /// validation aggregates; no per-frame features. Version 2 pins the source
+    /// and rectangular decision; old half-plane calibrations must be repeated.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut b = MAGIC.to_vec();
         for v in self.screen.resolution {
             b.extend(v.to_le_bytes());
         }
         b.push(u8::from(self.screen.distance_assumed));
+        b.push(u8::from(self.kind == FeatureKind::UniGaze));
         for v in self
             .mean
             .into_iter()
             .chain(self.scale)
-            .chain(self.logistic)
+            .chain(self.residual)
             .chain(self.ridge.into_iter().flatten())
             .chain(self.screen.size_mm)
             .chain([self.screen.distance_mm])
@@ -291,14 +347,19 @@ impl CalibrationModel {
         b
     }
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        const LEN: usize = 8 + 8 + 1 + (N * 2 + P * 3 + 7 + 6) * 8 + 8;
-        if bytes.len() != LEN || &bytes[..8] != MAGIC || bytes[16] > 1 {
+        const LEN: usize = 8 + 8 + 2 + (N * 2 + 2 + P * 2 + 7 + 6) * 8 + 8;
+        if bytes.len() != LEN || &bytes[..8] != MAGIC || bytes[16] > 1 || bytes[17] > 1 {
             return Err(CalibrationError(
                 "unsupported or corrupt calibration weights",
             ));
         }
         let u32_at = |i| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
-        let mut cursor = 17;
+        let kind = if bytes[17] == 0 {
+            FeatureKind::MediaPipe
+        } else {
+            FeatureKind::UniGaze
+        };
+        let mut cursor = 18;
         let mut next = || {
             let v = f64::from_le_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
             cursor += 8;
@@ -306,7 +367,7 @@ impl CalibrationModel {
         };
         let mean = std::array::from_fn(|_| next());
         let scale = std::array::from_fn(|_| next());
-        let logistic = std::array::from_fn(|_| next());
+        let residual = std::array::from_fn(|_| next());
         let ridge = std::array::from_fn(|_| std::array::from_fn(|_| next()));
         let size_mm = [next(), next()];
         let distance_mm = next();
@@ -324,7 +385,8 @@ impl CalibrationModel {
         let model = Self {
             mean,
             scale,
-            logistic,
+            residual,
+            kind,
             ridge,
             screen: Screen {
                 resolution: [u32_at(8), u32_at(12)],
@@ -343,10 +405,11 @@ impl CalibrationModel {
             .mean
             .into_iter()
             .chain(model.scale)
-            .chain(model.logistic)
+            .chain(model.residual)
             .chain(model.ridge.into_iter().flatten())
             .any(|x| !x.is_finite())
             || model.scale.iter().any(|x| *x < 1e-3)
+            || model.residual.iter().any(|x| *x < 1e-3)
             || !(0.5..=1.0).contains(&threshold)
             || !(0.0..=0.1).contains(&target_fpr)
             || [
@@ -413,10 +476,15 @@ pub fn fit(
             "need at least 12 usable training frames of each class; improve lighting and retry",
         ));
     }
+    let kind = rows[0].1.kind();
+    if rows.iter().any(|(_, f)| f.kind() != kind) {
+        return Err(CalibrationError("cannot mix gaze sources in calibration"));
+    }
     let mut m = CalibrationModel {
         mean: [0.0; N],
         scale: [0.0; N],
-        logistic: [0.0; P],
+        residual: [1e-3; 2],
+        kind,
         ridge: [[0.0; P]; 2],
         screen,
         threshold: 0.5,
@@ -457,31 +525,15 @@ pub fn fit(
         .cholesky()
         .ok_or(CalibrationError("singular calibration fit"))?;
     m.ridge = rhs.map(|b| solve.solve(&b).into());
-    let mut weights = SVector::<f64, P>::zeros();
-    for _ in 0..40 {
-        let mut h = SMatrix::<f64, P, P>::zeros();
-        let mut g = SVector::<f64, P>::zeros();
-        for (s, x) in &vectors {
-            let balance = 0.5 / if s.minimap { positives } else { negatives } as f64;
-            let p = sigmoid(weights.dot(x));
-            g += x * (p - f64::from(s.minimap)) * balance;
-            h += x * x.transpose() * (p * (1.0 - p) * balance);
-        }
-        for i in 0..P {
-            let penalty = if i == N { 1e-9 } else { options.regularization };
-            h[(i, i)] += penalty;
-            g[i] += penalty * weights[i];
-        }
-        let delta = h
-            .cholesky()
-            .ok_or(CalibrationError("singular classifier fit"))?
-            .solve(&g);
-        weights -= delta;
-        if delta.norm() < 1e-7 {
-            break;
-        }
-    }
-    m.logistic = weights.into();
+    m.residual = std::array::from_fn(|axis| {
+        (rows
+            .iter()
+            .map(|(s, f)| (m.point(*f)[axis] - s.target[axis]).powi(2))
+            .sum::<f64>()
+            / rows.len() as f64)
+            .sqrt()
+            .max(1e-3)
+    });
     for minimap in [false, true] {
         if validation
             .iter()

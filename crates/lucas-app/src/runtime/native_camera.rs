@@ -1,10 +1,12 @@
-//! A dedicated camera/inference thread with a single numeric latest-sample slot.
+//! Inference worker with a single numeric latest-sample slot, fed by LatestCamera.
 //! Disabling waits for acquisition to finish and drops the source before handing
 //! the device to calibration. No RGB queue, recording or persistence exists here.
-use super::camera::CaptureSession;
 use lucas_gaze::{
-    GazeSample, MediaPipeLandmarker, WebcamGazeSource, camera::NokhwaCamera,
-    models::VerifiedModels, runtime::OrtBackend,
+    GazeSample, GazeSource,
+    camera::NokhwaCamera,
+    features::FeatureKind,
+    latest::LatestCamera,
+    tracker::{ModelGazeSource, Selection, Tracker},
 };
 use std::{
     path::PathBuf,
@@ -20,25 +22,37 @@ pub struct CameraWorker {
     stop: Arc<AtomicBool>,
     latest: Arc<Mutex<Option<GazeSample>>>,
     handle: Option<JoinHandle<()>>,
+    notice: Arc<Mutex<Option<String>>>,
 }
 impl CameraWorker {
-    pub fn start(index: u32, models: PathBuf, origin: Instant) -> std::io::Result<Self> {
+    pub fn start(
+        index: u32,
+        models: PathBuf,
+        origin: Instant,
+        expected: FeatureKind,
+    ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let latest = Arc::new(Mutex::new(None));
         let (signal, slot) = (stop.clone(), latest.clone());
+        let notice = Arc::new(Mutex::new(None));
+        let message = notice.clone();
         let handle = thread::Builder::new()
             .name("lucas-gaze".into())
             .spawn(move || {
                 let run = || -> lucas_gaze::Result<()> {
-                    let backend = OrtBackend::new(VerifiedModels::load(&models)?)?;
-                    let camera = NokhwaCamera::open_c270(index)?;
-                    // Acquisition already uses the same monotonic clock as the
-                    // app; never stamp inference completion as an observation.
-                    let camera_origin = camera.timestamp_origin();
-                    let mut source = CaptureSession::default();
-                    source.set_wanted(true, || {
-                        WebcamGazeSource::new(camera, MediaPipeLandmarker::new(backend))
+                    let tracker = Tracker::load_cancellable(&models, Selection::from_env()?, Some(&signal))?;
+                    *message.lock().unwrap() = Some(tracker.description().into());
+                    if tracker.kind() != expected {
+                        return Err(lucas_gaze::Error::Source("Gaze source changed. Run a full calibration with the selected source before playing.".into()));
+                    }
+                    if signal.load(Ordering::Acquire) { return Ok(()); }
+                    let camera = LatestCamera::start(move || {
+                        let camera = NokhwaCamera::open_c270(index)?;
+                        let origin = camera.timestamp_origin();
+                        Ok((camera, origin))
                     })?;
+                    let camera_origin = camera.timestamp_origin();
+                    let mut source = ModelGazeSource::new(camera, tracker)?;
                     while !signal.load(Ordering::Acquire) {
                         let Some(mut sample) = source.next_sample()? else {
                             break;
@@ -54,18 +68,24 @@ impl CameraWorker {
                         }
                         thread::sleep(Duration::from_millis(1));
                     }
-                    source.set_wanted(false, || unreachable!())?;
                     Ok(())
                 };
-                // Failure is represented as unknown; the tray offers a retry by
-                // switching modes, never silently treating failure as an away look.
-                let _ = run();
+                // Failure remains unknown and is visible, never a silent CPU
+                // fallback. Switching modes/recalibrating explicitly retries.
+                if let Err(error) = run() {
+                    *message.lock().unwrap() = Some(format!("Gaze stopped: {error}"));
+                    *slot.lock().unwrap() = None;
+                }
             })?;
         Ok(Self {
             stop,
             latest,
             handle: Some(handle),
+            notice,
         })
+    }
+    pub fn take_notice(&self) -> Option<String> {
+        self.notice.lock().ok()?.take()
     }
     pub fn take_sample(&self) -> Option<GazeSample> {
         self.latest.lock().ok()?.take()

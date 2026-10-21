@@ -1,0 +1,14 @@
+# Installed locally by setup.ps1; never publish pretrained weights or runtimes.
+/READY
+/.venv/
+/python/
+/cache/
+/checks/
+/bootstrap/
+/source.zip
+/unigaze_h14_joint.safetensors
+/2DFAN4-cd938726ad.zip
+/s3fd-619a316812.pth
+/portrait.jpg
+*.part
+__pycache__/

@@ -1,6 +1,10 @@
 # Offline gaze models
 
-The two checked-in ONNX files are the CPU models used by `lucas-gaze`:
+UniGaze-H + SFD/FAN is the optional default NVIDIA tracker after its
+[one-time setup](unigaze/README.md). Its weights are **not committed or bundled**;
+the installer verifies published assets and installs a private CUDA runtime.
+
+The two checked-in ONNX files are the selectable MediaPipe CPU fallback:
 
 | File | Input (RGB, NHWC) | Outputs |
 | --- | --- | --- |
@@ -32,7 +36,8 @@ Copyright The MediaPipe Authors / Google LLC, **Apache-2.0**; see
 format/precision representation, not weights through training. The bundle's
 blendshape model is not included or used in M4.1. Head pose is a weak-perspective
 similarity fit to seven MediaPipe canonical vertices, not camera-calibrated metric
-3D reconstruction. Calibration/classification is a later milestone.
+3D reconstruction. See the [calibration reference](../crates/lucas-gaze/README.md#per-user-calibration-m51)
+for the personal screen mapping and minimap decision.
 
 Reference decoder contracts:
 [detector graph](https://github.com/google-ai-edge/mediapipe/blob/v0.10.32/mediapipe/tasks/cc/vision/face_detector/face_detector_graph.cc),
@@ -41,18 +46,21 @@ Reference decoder contracts:
 
 ## Verify or convert (development only)
 
-Normal builds/tests need no Python or model download:
+These checks use the committed MediaPipe models, without model downloads. See the
+[root build guide](../README.md#build-and-check) for tool prerequisites, including
+Python for the UniGaze IPC tests run by `cargo test` on Unix:
 
 ```sh
 cargo xtask models verify
 cargo test -p lucas-gaze
-cargo test -p lucas-gaze --no-default-features # portable math/trace tests
+cargo test -p lucas-gaze --no-default-features # portable math/trace and IPC tests
 cargo bench -p lucas-gaze --bench pipeline
 ```
 
 `ort` downloads its native **runtime library at build time**, not models. Releases
 must package the matching runtime library where required by the target. Defaults
-use one CPU inference thread, no parallel operators, no idle spin and no GPU.
+for the MediaPipe fallback use one CPU inference thread, no parallel operators,
+no idle spin and no GPU. UniGaze uses its own explicit CUDA child, not this ORT runtime.
 
 To convert once, on Linux x86_64 with Python 3.12 (use a temporary venv):
 
