@@ -59,17 +59,28 @@ impl Store {
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
-        let mut settings = settings.clone();
-        settings.calibration = self.load_settings()?.calibration;
-        self.write_settings(&settings)
+        self.update_settings(|current| {
+            *current = Settings {
+                calibration: current.calibration,
+                ..settings.clone()
+            };
+        })
     }
 
-    fn write_settings(&self, settings: &Settings) -> Result<()> {
+    fn update_settings(&self, update: impl FnOnce(&mut Settings)) -> Result<()> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let mut settings = self.load_settings()?;
+        update(&mut settings);
         settings.validate()?;
         atomic_write(
             &self.directory.join("settings.toml"),
-            toml::to_string_pretty(settings)?.as_bytes(),
-        )
+            toml::to_string_pretty(&settings)?.as_bytes(),
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     /// Remember display choices without committing a setup draft or replacing
@@ -78,9 +89,7 @@ impl Store {
         &self,
         preferences: crate::CalibrationPreferences,
     ) -> Result<()> {
-        let mut settings = self.load_settings()?;
-        settings.calibration = preferences;
-        self.write_settings(&settings)
+        self.update_settings(|settings| settings.calibration = preferences)
     }
 
     pub fn load_calibration(&self) -> Result<Option<Calibration>> {
