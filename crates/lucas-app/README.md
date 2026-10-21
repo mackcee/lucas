@@ -165,7 +165,7 @@ for fitted classification and held-out G2 scoring (see [xtask](../../xtask/READM
 ## In-app calibration
 
 Open `lucas --calibrate`, connect your camera, pick **Screen size (diagonal)**
-(24″, 27″, 32″ or 34″), check the assumed eye-to-screen distance, then
+(24 in, 27 in, 32 in or 34 in), check the assumed eye-to-screen distance, then
 **Start calibration**. Dimensions are calculated from the main calibration
 monitor's resolution/aspect ratio, including ultrawide, and rounded to whole mm:
 27″ at 16:9 gives 598×336 mm. Choose **Custom** to enter measured width and height
@@ -173,7 +173,8 @@ instead (for example, 597×336 mm). Windows DPI is not physical size.
 
 Screen size, custom dimensions and viewing distance are remembered locally when
 full calibration starts, even if it later fails or is cancelled. Standalone,
-setup and tray calibration all reopen with those choices; finishing setup does
+setup and tray calibration all reopen with those choices; finishing setup or
+changing unrelated settings (such as the tray level or Live Client gate) does
 not reset them. New users and older settings without this preference start at
 24″ and 650 mm (531×299 mm at 16:9). These dimensions affect reported degrees,
 not the minimap decision or pass thresholds.

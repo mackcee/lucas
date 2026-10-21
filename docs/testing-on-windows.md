@@ -293,19 +293,19 @@ for reported webcam calibration evidence and its limits.
 
 Adjust front lighting and camera placement, connect the camera, and wait for the
 source/device and live tracking indicators. First startup can take up to two
-minutes; model warmup completes before the camera opens. Pick **Screen size
-(diagonal)**: 24″, 27″, 32″ or 34″. Dimensions follow the main calibration monitor's
-resolution/aspect ratio, not Windows DPI: 27″ at 3840×2160 gives 598×336 mm after
-rounding. **Custom** allows measured dimensions (597×336 mm for the investigated
-display). Check your viewing distance (about 650 mm in that setup). Starting full
-calibration remembers these choices, including if it later fails or is cancelled.
-Reopen calibration from the tray or setup and confirm your choice and distance
-are preselected; finishing setup must preserve them. On an ultrawide monitor,
-confirm the displayed dimensions follow its resolution rather than 16:9.
+minutes; model warmup completes before the camera opens. Follow the
+[in-app calibration guide](../crates/lucas-app/README.md#in-app-calibration)
+for screen-size selection, remembered preferences, target timing, natural
+movement, validation and saved-profile behavior.
 
-Follow the [in-app calibration guide](../crates/lucas-app/README.md#in-app-calibration)
-for target timing, natural movement, validation and saved-profile behavior. The
-[calibration reference](../crates/lucas-gaze/README.md#per-user-calibration-m51)
+To check preference persistence, start standalone calibration with **27 in** and
+an adjusted viewing distance, then cancel and reopen from the tray or setup.
+Confirm both choices are preselected, including after finishing setup or changing
+the tray's training level or Live Client gate. Also check **Custom** with measured
+dimensions, and on an ultrawide monitor compare the displayed dimensions with the
+monitor's aspect ratio rather than assuming 16:9.
+
+The [calibration reference](../crates/lucas-gaze/README.md#per-user-calibration-m51)
 explains the rectangular score and unchanged dwell/pass thresholds. Low mean
 error and high usable-frame coverage do not prove that map/elsewhere samples
 are separable; do not loosen thresholds to hide that failure.

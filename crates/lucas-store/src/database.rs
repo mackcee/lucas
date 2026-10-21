@@ -58,6 +58,9 @@ impl Store {
         Ok(settings)
     }
 
+    /// Save ordinary settings while preserving the current on-disk calibration
+    /// preferences, even if this snapshot predates standalone calibration.
+    /// Use `save_calibration_preferences` to change those preferences explicitly.
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
         self.update_settings(|current| {
             *current = Settings {
@@ -67,6 +70,10 @@ impl Store {
         })
     }
 
+    /// The SQLite write lock serializes settings read/merge/write across Store
+    /// instances and processes; atomic replacement alone cannot prevent lost updates.
+    /// It is a lock, not a transaction spanning SQLite and the TOML file: rollback
+    /// cannot undo a completed file replacement. See tests/settings_concurrency.rs.
     fn update_settings(&self, update: impl FnOnce(&mut Settings)) -> Result<()> {
         let transaction = rusqlite::Transaction::new_unchecked(
             &self.connection,

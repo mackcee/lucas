@@ -50,7 +50,8 @@ impl eframe::App for Capture {
         }
         self.frames += 1;
         if self.frames == 4 {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         ui.ctx().request_repaint_after(Duration::from_millis(30));
     }
