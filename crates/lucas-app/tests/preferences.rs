@@ -190,7 +190,8 @@ fn failed_finish_keeps_the_in_memory_draft_retryable() {
     setup.advance();
     std::fs::create_dir(dir.path().join("settings.toml")).unwrap();
     assert!(setup.finish(&store).is_err());
-    assert!(store.load_calibration().unwrap().is_none());
+    // Reading the remembered display preferences fails before any data is replaced.
+    assert_eq!(store.load_calibration().unwrap(), Some(profile()));
     std::fs::remove_dir(dir.path().join("settings.toml")).unwrap();
     assert!(needs_setup(&store.load_settings().unwrap()));
     assert_eq!(setup.step, SetupStep::Level);
@@ -198,6 +199,36 @@ fn failed_finish_keeps_the_in_memory_draft_retryable() {
     assert!(!needs_setup(&store.load_settings().unwrap()));
     assert_eq!(store.load_settings().unwrap().camera_index, 9);
     assert!(store.load_calibration().unwrap().is_some());
+}
+
+#[test]
+fn finishing_setup_preserves_display_preferences_saved_by_calibration() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_in(dir.path()).unwrap();
+    let mut setup = Setup::load(&store).unwrap();
+    setup.select_camera(3);
+    let preferences = lucas_store::CalibrationPreferences {
+        screen_size: lucas_store::ScreenSize::Inches27,
+        viewing_distance_mm: 720,
+        ..Default::default()
+    };
+    store.save_calibration_preferences(preferences).unwrap();
+    // A cancelled draft does not commit its camera, but display choices survive.
+    let reopened = Setup::load(&store).unwrap();
+    assert_eq!(reopened.draft.calibration, preferences);
+    assert_eq!(reopened.draft.camera_index, 0);
+    assert!(!reopened.draft.setup_completed);
+    for _ in 0..3 {
+        setup.advance();
+    }
+    setup.calibrated(profile());
+    setup.advance();
+    setup.advance();
+    setup.finish(&store).unwrap();
+    let saved = store.load_settings().unwrap();
+    assert_eq!(saved.calibration, preferences);
+    assert_eq!(saved.camera_index, 3);
+    assert!(saved.setup_completed);
 }
 
 #[test]

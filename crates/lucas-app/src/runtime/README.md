@@ -12,7 +12,8 @@ see [Getting started](../../../../README.md#getting-started).
   first-run wizard: privacy, camera/quality, skippable Borderless check, the existing
   calibration UI, next-game alignment instructions, and starting level.
   **First-run setup…** reopens it with current settings. Close discards the in-memory
-  draft; only Finish commits settings, calibration and the completion flag. Draft
+  draft, except for the [remembered display preferences](../../README.md#in-app-calibration).
+  Finish commits the remaining settings, calibration and the completion flag. Draft
   camera choices/weights cannot replace the live pair before Finish. Finish is not
   a multi-file transaction: it removes the old calibration, saves settings with
   completion false, saves the new calibration, then marks completion true. A failed

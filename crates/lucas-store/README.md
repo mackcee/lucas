@@ -7,10 +7,14 @@ A missing `LOCALAPPDATA` is an error, not a fallback into the working directory.
 ## Files and schema
 
 - `settings.toml`: serde schema version 1. Missing fields, including nested pulse
-  fields, get defaults; unknown keys are tolerated. Malformed values and newer
-  versions return errors and are never silently replaced. Defaults are an amber
+  and calibration fields, get defaults; unknown keys are tolerated. Malformed
+  values and newer versions return errors and are never silently replaced. Defaults are an amber
   ripple, sound off, Live Client gate and window-only fallback on, and the first
-  10-second ramp level. Settings changes replace the file atomically.
+  10-second ramp level. Settings changes replace the file atomically. The
+  [`Settings` types](src/settings.rs) own field names, enum spellings and limits;
+  see the [calibration guide](../lucas-app/README.md#in-app-calibration) for display
+  preference usage and the [`Store` save methods](src/database.rs) for merge and
+  cross-process locking contracts.
 - `calibration.json`: versioned opaque model bytes (1–65536 bytes), virtual-desktop
   physical screen geometry, creation time in Unix milliseconds, and optional
   validation error in degrees. The payload is owned by

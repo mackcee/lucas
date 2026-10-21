@@ -58,12 +58,45 @@ impl Store {
         Ok(settings)
     }
 
+    /// Save ordinary settings while preserving the current on-disk calibration
+    /// preferences, even if this snapshot predates standalone calibration.
+    /// Use `save_calibration_preferences` to change those preferences explicitly.
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+        self.update_settings(|current| {
+            *current = Settings {
+                calibration: current.calibration,
+                ..settings.clone()
+            };
+        })
+    }
+
+    /// The SQLite write lock serializes settings read/merge/write across Store
+    /// instances and processes; atomic replacement alone cannot prevent lost updates.
+    /// It is a lock, not a transaction spanning SQLite and the TOML file: rollback
+    /// cannot undo a completed file replacement. See tests/settings_concurrency.rs.
+    fn update_settings(&self, update: impl FnOnce(&mut Settings)) -> Result<()> {
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let mut settings = self.load_settings()?;
+        update(&mut settings);
         settings.validate()?;
         atomic_write(
             &self.directory.join("settings.toml"),
-            toml::to_string_pretty(settings)?.as_bytes(),
-        )
+            toml::to_string_pretty(&settings)?.as_bytes(),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Remember display choices without committing a setup draft or replacing
+    /// other preferences. Called when a full calibration starts.
+    pub fn save_calibration_preferences(
+        &self,
+        preferences: crate::CalibrationPreferences,
+    ) -> Result<()> {
+        self.update_settings(|settings| settings.calibration = preferences)
     }
 
     pub fn load_calibration(&self) -> Result<Option<Calibration>> {

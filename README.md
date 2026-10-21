@@ -66,10 +66,10 @@ can also be built and checked on Linux. Builds will initially be unsigned.
    For NVIDIA gaze tracking, run the [UniGaze setup and headless GPU check](docs/testing-on-windows.md#one-time-unigaze-setup-nvidia-cuda) before calibrating.
 2. **Run `lucas.exe`.** First-run setup walks through camera choice and live tracking
    quality, a skippable Borderless check, calibration, next-game minimap alignment
-   and a starting level. Frames are never stored; nothing leaves your PC. Closing
-   before Finish discards the draft; reopen **First-run setup…** from the
-   notification-area icon to start again. Finish returns to the tray. If Finish
-   fails, retry while the window is open (see [save behavior](crates/lucas-app/src/runtime/README.md#before-play)).
+   and a starting level. Frames are never stored; nothing leaves your PC.
+   Reopen **First-run setup…** from the notification-area icon to start again.
+   Finish returns to the tray. See [save behavior](crates/lucas-app/src/runtime/README.md#before-play)
+   for what survives closing setup and how to retry a failed Finish.
    **Calibrate once, then play.** LUCAS reuses a passing calibration automatically
    in every game with the same screen and minimap geometry; there is no per-game
    quick check. If needed, use **Align minimap…** and the
