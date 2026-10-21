@@ -111,7 +111,9 @@ fn stale_settings_writes_preserve_standalone_calibration_choices() {
         };
         {
             let standalone = Store::open_in(dir.path()).unwrap();
-            standalone.save_calibration_preferences(preferences).unwrap();
+            standalone
+                .save_calibration_preferences(preferences)
+                .unwrap();
         }
         assert!(tray.load_calibration().unwrap().is_none());
 

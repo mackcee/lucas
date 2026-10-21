@@ -129,8 +129,8 @@ fn picker_labels_have_renderable_glyphs() {
     for shape in &output.shapes {
         if let egui::epaint::Shape::Text(text) = &shape.shape {
             for section in &text.galley.job.sections {
-                let label = &text.galley.job.text
-                    [section.byte_range.start.0..section.byte_range.end.0];
+                let label =
+                    &text.galley.job.text[section.byte_range.start.0..section.byte_range.end.0];
                 assert!(
                     context.fonts_mut(|fonts| fonts.has_glyphs(&section.format.font_id, label)),
                     "picker text renders a missing-glyph box: {label:?}"
@@ -145,6 +145,10 @@ fn export_settings(source: &std::path::Path, name: &str) {
     if let Some(root) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
         let destination = std::path::PathBuf::from(root).join(name);
         std::fs::create_dir_all(&destination).unwrap();
-        std::fs::copy(source.join("settings.toml"), destination.join("settings.toml")).unwrap();
+        std::fs::copy(
+            source.join("settings.toml"),
+            destination.join("settings.toml"),
+        )
+        .unwrap();
     }
 }
