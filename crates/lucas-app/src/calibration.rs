@@ -1,4 +1,4 @@
-//! Calibration schedule, in-memory observations and the M5.2 revalidation seam.
+//! Calibration schedule, in-memory observations and optional saved-fit testing.
 //! No camera frames or calibration observations are persisted by this module.
 //! Explicit numeric diagnostic export is isolated in calibration_diagnostics.
 mod readiness;
@@ -247,8 +247,9 @@ pub fn fit_session(
     }
     calibration::fit(&train, &valid, script.screen(), FitOptions::default())
 }
-/// M5.2 calls this after presenting `CalibrationScript::quick`. This never
-/// adjusts weights/thresholds or silently promotes failed tracking to a check.
+/// Evaluate the optional test after presenting `CalibrationScript::quick`.
+/// This never adjusts weights/thresholds; its result is feedback, not permission
+/// to enable coaching or revoke a usable saved fit.
 pub fn quick_revalidate(
     model: &CalibrationModel,
     observations: &[Observation],
