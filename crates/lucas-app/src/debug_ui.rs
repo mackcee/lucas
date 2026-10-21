@@ -799,7 +799,7 @@ impl DebugApp {
                         }
                     });
                     ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
-                    ui.label("Only weights and validation results are saved. Calibration samples stay in memory; the camera never saves images.");
+                    ui.label("By default, only weights and validation results are saved; calibration samples stay in memory. If you opted into local numeric diagnostic exports, see the notice above. No images are saved and nothing is uploaded.");
                 }
                 ui.horizontal(|ui| {
                     if self.runtime_kind != Some(RunKind::Quick)
