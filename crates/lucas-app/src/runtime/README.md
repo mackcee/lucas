@@ -100,21 +100,15 @@ most that same bounded tracking credit.
 Only alive, supported Summoner's Rift play after 1:30, League foreground,
 validated geometry and usable gaze advance the clock. Foreground/tracking loss
 freeze it; death/loading/end reset it. Sustained minimap viewing hides the pulse
-and does not create repeated checks. A check restarts the reminder interval;
-while looking away, a new reminder opportunity occurs every interval, including
-after a skipped probabilistic reminder. Ramp 5 s therefore repeats around 5, 10,
-15 s without a check, with independently sampled ±10% jitter per interval. Late
-ticks never replay missed reminders in a burst. Baseline/Graduated and solo games
-remain silent. The core policy, not a new app timer, supplies this schedule.
+and does not create repeated checks. The runtime delegates repeating reminders
+to the [core pulse policy](../../../lucas-core/README.md#manual-programme-and-pulse-policy),
+not a separate app timer. That reference owns cadence, jitter, skipped intervals
+and the Fade-only cap. Solo games suppress delivery regardless of policy.
 
-Ramp keeps its selected cadence even with the density cap enabled. The adaptive
-+750 ms per pulse / −250 ms per unprompted check staircase now applies only in
-Fade, where existing delays, probabilities and jitter still apply. Strong and
-Medium strokes scale with minimap size and are brighter; their two ripple waves
-fade more slowly within the same 1.2-second animation. Soft/Minimal, the transparent
-map interior, click-through behaviour, style/colour selection and optional sound
-are preserved. Each emitted repeat increments the summary's pulse count and is
-stored as its own event; pulse-to-glance latency uses the most recent pulse.
+The [overlay reference](../../../lucas-overlay/README.md#visuals) owns salience,
+size scaling and animation. Repeats use the same event persistence path and
+[core metrics definitions](../../../lucas-core/README.md#metrics-and-persistence)
+as other pulses.
 
 If Settings says 5 s but a completed game's card says 10 s, check the game's
 level snapshot: changing the level during that game only affects the next match.

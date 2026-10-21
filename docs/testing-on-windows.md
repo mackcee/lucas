@@ -157,9 +157,10 @@ native overlay correctness.
   calibration/check. Failure may show a hint suggesting recalibration. A passing
   test must not override a real geometry mismatch. Recalibration/setup cancellation
   likewise uses a still-valid saved fit rather than revoking it by UI outcome.
-- Check pulses after eligible gaps, no pulse during a sustained map look, and
-  suppression when dead, alt-tabbed, tracking lost or outside supported play.
-  Delays have jitter and a density cap, so they are not exact metronome intervals.
+- Check that reminders repeat until a map look, stop during sustained map viewing,
+  and are suppressed when dead, alt-tabbed, tracking lost or outside supported play.
+  Use the [selected-level cadence guidance](../README.md#getting-started) for
+  expected intervals, jitter and the Fade-only density cap.
   Confirm click-through and no focus stealing. Note tracking quality and comfort.
 - Mid-game select **8 s**. The submenu check should change, but this game's goal
   and policy must stay at 10 s. At game end, the card should retain the old level

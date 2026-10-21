@@ -97,32 +97,28 @@ cargo clippy -p xtask --all-targets -- -D warnings
 
 These tests also run in the existing Linux and Windows workspace CI jobs.
 The main regression uses six 30-minute games per habit. It compares Ramp pulses
-to the repeating-policy reference below within ±25%, and analytical solo blind
-time within four percentage points. Ramp cap-on/off loads must be identical.
+to the repeating-policy anchors in [`src/regression.rs`](src/regression.rs)
+within ±25%, and analytical solo blind time within four percentage points.
+Ramp cap-on/off loads must be identical.
 A separate Fade level 7 regression uses means 15/20 s and requires capped load
 to remain 30–75% of uncapped load, preserving staircase settling time. Tests also
 cover repeated unanswered reminders as a single prompted gap, the approved fade
 levels, zero-assistance levels, gamma mean/variance, response timing, seed/order
 reproducibility, exact eligible duration, and CLI validation.
 
-For orientation, `cargo xtask sim --cap both` (seed 42, default 20 games) gives:
+Generate current load estimates directly from the simulator rather than a copied
+output table:
 
-| Habit mean | Pulses/game off / on | Solo blind at S=10 |
-| --- | --- | --- |
-| 4 s | 15.8 / 15.8 | 1.9% |
-| 6 s | 46.6 / 46.6 | 8.8% |
-| 8 s | 70.3 / 70.3 | 17.1% |
-| 10 s | 89.8 / 89.8 | 25.6% |
-| 15 s | 118.5 / 118.5 | 43.5% |
-| 20 s | 134.2 / 134.2 | 54.0% |
+```sh
+cargo xtask sim --cap both
+cargo xtask sim --games 6 --cap both --levels 7
+```
 
-These replace the old one-shot prototype anchors: repeated reminders increase
-load for long missed gaps, and Ramp no longer silently lengthens the chosen
-cadence. Fade still reduces help; `--games 6 --cap both --levels 7` gives about
-90.8 → 44.2 pulses for a 15 s habit. These are synthetic load estimates, not
-real-game efficacy evidence. Bands are intentionally not golden exact counts;
-a policy change that floods players should fail without requiring every harmless
-timing change to update a snapshot.
+The first command compares Ramp cap settings; the second exercises Fade.
+These are synthetic load estimates, not real-game efficacy evidence. The
+regression anchors replace the old one-shot prototype references; bands are
+intentionally not golden exact counts, so harmless timing changes need not update
+a snapshot.
 
 ## G2 calibration and glance evaluation
 
