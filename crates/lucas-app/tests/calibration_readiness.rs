@@ -143,7 +143,10 @@ fn provisional_fallback_rejection_recovers_once_to_quick_check_at_matching_live_
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open_in(dir.path()).unwrap();
     store.save_calibration(&profile()).unwrap();
+    let saved_before = std::fs::read(dir.path().join("calibration.json")).unwrap();
     let (mut gate, mut rt) = rejected_provisional(&store);
+    let rejected_message = gate.tray_message(false);
+    let rejected_details = gate.issue().unwrap().details();
     let update = gate.update_geometry(
         geometry(false),
         GeometrySource::LiveGame,
@@ -173,16 +176,46 @@ fn provisional_fallback_rejection_recovers_once_to_quick_check_at_matching_live_
         .unwrap();
     assert_eq!(tick.status, Status::QuickCheckNeeded);
     assert!(tick.hide && tick.pulse.is_none());
-    assert!(
-        !gate
-            .update_geometry(
-                geometry(false),
-                GeometrySource::LiveGame,
-                rt.calibration(),
-                false
-            )
-            .reload
+    let repeated = gate.update_geometry(
+        geometry(false),
+        GeometrySource::LiveGame,
+        rt.calibration(),
+        false,
     );
+    assert!(!repeated.reload);
+    assert_eq!(
+        std::fs::read(dir.path().join("calibration.json")).unwrap(),
+        saved_before,
+        "geometry recovery must not rewrite the user's saved calibration"
+    );
+    if let Some(evidence) = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR") {
+        let evidence = std::path::PathBuf::from(evidence);
+        std::fs::create_dir_all(&evidence).unwrap();
+        let report = serde_json::json!({
+            "synthetic_features_not_webcam_or_gpu_acceptance": true,
+            "provisional_rejection": {
+                "tray_message": rejected_message,
+                "details": rejected_details,
+                "minimap": geometry(true).minimap,
+            },
+            "first_live_geometry": {
+                "minimap": geometry(false).minimap,
+                "reload_requested": update.reload,
+                "calibration_state": format!("{:?}", rt.calibration()),
+                "runtime_status": format!("{:?}", tick.status),
+                "overlay_hidden": tick.hide,
+                "pulse_requested": tick.pulse.is_some(),
+                "rejection_cleared": gate.issue().is_none(),
+            },
+            "repeat_live_geometry_requests_reload": repeated.reload,
+            "persisted_calibration_unchanged": true,
+        });
+        std::fs::write(
+            evidence.join("synthetic-calibration-readiness.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
 }
 #[test]
 fn captured_matching_startup_geometry_is_accepted_without_a_recovery_or_threshold_change() {

@@ -308,7 +308,8 @@ acquisition/visibility/settling times, labels, geometry (including DPI/canvas),
 per-target scores/errors, the selected threshold/effective rectangle, and fitted
 weights. Failed/cancelled full calibrations are included. Nothing is uploaded.
 Files can reveal where you looked; share only the file you choose, then delete it
-when no longer needed. Normal calibration does **not** export these samples.
+when no longer needed; see the [Delete all data scope](../crates/lucas-store/README.md#privacy-controls)
+for separately exported files. Normal calibration does **not** export these samples.
 
 From the test bundle, close other LUCAS instances first:
 
