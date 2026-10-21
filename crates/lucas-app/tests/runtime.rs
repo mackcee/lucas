@@ -361,12 +361,9 @@ fn five_second_repeats_hide_on_check_restart_after_view_and_survive_storage() {
                 ));
             }
             let (started, visual) = active_animation.unwrap_or((ms, Default::default()));
-            let image = lucas_overlay::render::frame(
-                surface,
-                visual,
-                Duration::from_millis(ms - started),
-            )
-            .unwrap();
+            let image =
+                lucas_overlay::render::frame(surface, visual, Duration::from_millis(ms - started))
+                    .unwrap();
             let visible = image.pixels().iter().any(|p| p.alpha() != 0);
             if tick.hide {
                 assert!(!visible);
