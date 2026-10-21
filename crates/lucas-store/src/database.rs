@@ -59,6 +59,12 @@ impl Store {
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<()> {
+        let mut settings = settings.clone();
+        settings.calibration = self.load_settings()?.calibration;
+        self.write_settings(&settings)
+    }
+
+    fn write_settings(&self, settings: &Settings) -> Result<()> {
         settings.validate()?;
         atomic_write(
             &self.directory.join("settings.toml"),
@@ -74,7 +80,7 @@ impl Store {
     ) -> Result<()> {
         let mut settings = self.load_settings()?;
         settings.calibration = preferences;
-        self.save_settings(&settings)
+        self.write_settings(&settings)
     }
 
     pub fn load_calibration(&self) -> Result<Option<Calibration>> {

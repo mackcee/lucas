@@ -91,6 +91,71 @@ fn screen_choices_custom_dimensions_and_distance_survive_reopening() {
 }
 
 #[test]
+fn stale_settings_writes_preserve_standalone_calibration_choices() {
+    for size in [ScreenSize::Inches27, ScreenSize::Custom] {
+        let dir = tempfile::tempdir().unwrap();
+        let tray = Store::open_in(dir.path()).unwrap();
+        tray.save_settings(&Settings {
+            setup_completed: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let mut tray_settings = tray.load_settings().unwrap();
+        let mut appearance_draft = tray_settings.clone();
+        assert_eq!(tray_settings.calibration.screen_size, ScreenSize::Inches24);
+
+        let preferences = CalibrationPreferences {
+            screen_size: size,
+            custom_size_mm: [597, 336],
+            viewing_distance_mm: 725,
+        };
+        {
+            let standalone = Store::open_in(dir.path()).unwrap();
+            standalone.save_calibration_preferences(preferences).unwrap();
+        }
+        assert!(tray.load_calibration().unwrap().is_none());
+
+        tray_settings.level_index = 3;
+        tray.save_settings(&tray_settings).unwrap();
+        let mut expected = tray_settings.clone();
+        expected.calibration = preferences;
+        assert_eq!(tray.load_settings().unwrap(), expected);
+
+        tray_settings.live_client_gate = false;
+        tray.save_settings(&tray_settings).unwrap();
+        expected.live_client_gate = false;
+        assert_eq!(tray.load_settings().unwrap(), expected);
+
+        appearance_draft.pulse.sound = true;
+        tray.save_settings(&appearance_draft).unwrap();
+        expected = appearance_draft;
+        expected.calibration = preferences;
+        drop(tray);
+        let reopened = Store::open_in(dir.path()).unwrap();
+        assert_eq!(reopened.load_settings().unwrap(), expected);
+    }
+}
+
+#[test]
+fn unrelated_settings_writes_do_not_replace_unreadable_preferences() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_in(dir.path()).unwrap();
+    let mut stale = store.load_settings().unwrap();
+    stale.level_index = 3;
+    for invalid in [
+        "[calibration]\nscreen_size = \"unknown\"\n",
+        "schema_version = 999\n",
+    ] {
+        std::fs::write(dir.path().join("settings.toml"), invalid).unwrap();
+        assert!(store.save_settings(&stale).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("settings.toml")).unwrap(),
+            invalid
+        );
+    }
+}
+
+#[test]
 fn invalid_preferences_fail_without_overwriting_saved_settings() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open_in(dir.path()).unwrap();
