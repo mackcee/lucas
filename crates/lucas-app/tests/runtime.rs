@@ -290,6 +290,79 @@ fn replay_checks_pulses_unknown_spans_and_stored_blind_seen_unknown_deaths() {
 }
 
 #[test]
+fn five_second_repeats_hide_on_check_restart_after_view_and_survive_storage() {
+    let model = fitted();
+    let [l, t, r, b] = model.screen().minimap;
+    let map = [(l + r) / 2.0, (t + b) / 2.0];
+    let mut runtime = Runtime::new(Settings {
+        level_index: 4,
+        density_cap: true,
+        ..Settings::default()
+    })
+    .unwrap();
+    let mut pulses = Vec::new();
+    for ms in (0..=26_000).step_by(50) {
+        let now = Duration::from_millis(ms);
+        if ms % 1000 == 0 {
+            runtime
+                .poll(
+                    now,
+                    Some(&snapshot(100.0 + ms as f64 / 1000.0, false, vec![])),
+                    1_000_000 + ms,
+                )
+                .unwrap();
+            if ms == 0 {
+                ready(&mut runtime, model.clone());
+            }
+        }
+        let looking = (17_000..19_000).contains(&ms);
+        let tick = runtime
+            .tick(
+                now,
+                inputs(),
+                Some(sample(ms, if looking { map } else { [0.5, 0.5] })),
+                1_000_000 + ms,
+            )
+            .unwrap();
+        if let Some(pulse) = tick.pulse {
+            assert!(!tick.hide);
+            assert!((4_500..=5_500).contains(&pulse.effective_delay_ms));
+            pulses.push(ms);
+        }
+        if (17_100..19_000).contains(&ms) {
+            assert!(tick.hide);
+            assert_eq!(tick.gap_ms, 0);
+            assert!(tick.pulse.is_none());
+        }
+    }
+    assert_eq!(pulses.len(), 4, "{pulses:?}");
+    assert!((4_500..=5_550).contains(&pulses[0]));
+    for pair in pulses[..3].windows(2) {
+        assert!((4_500..=5_550).contains(&(pair[1] - pair[0])));
+    }
+    assert!((23_500..=24_550).contains(&pulses[3]));
+    runtime
+        .finish(Duration::from_millis(26_000), 1_026_000)
+        .unwrap();
+    let summaries = runtime.take_summaries();
+    let summary = &summaries[0];
+    assert_eq!(summary.metrics.pulses, 4);
+    assert_eq!(summary.metrics.checks, 1);
+    assert_eq!(
+        summary
+            .events
+            .iter()
+            .filter(|e| matches!(e.kind, StoredEventKind::Pulse))
+            .count(),
+        4
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open_in(dir.path()).unwrap();
+    store.save_summary(summary).unwrap();
+    assert_eq!(store.summary(&summary.id).unwrap().as_ref(), Some(summary));
+}
+
+#[test]
 fn failed_poll_makes_outage_deaths_unknown_but_preserves_earlier_evidence() {
     let model = fitted();
     let [l, t, r, b] = model.screen().minimap;

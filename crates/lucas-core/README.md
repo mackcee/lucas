@@ -57,14 +57,23 @@ Changes apply at the latest observation boundary, reset the pulse opportunity an
 staircase, and are recorded as events. Constructors and setters accept only the
 levels in `TRAINING_LEVELS`; custom programmes are not supported.
 
-The nominal delay is `max(level_delay, staircase_delay)` when the density cap is
-on (default). The staircase starts at the level delay, rises 750 ms after each
-emitted pulse, and falls 250 ms after each unprompted check, saturating at zero.
-Jitter of ±10% is sampled **once per gap** on that nominal delay. There is one
-probabilistic opportunity per gap, including skipped opportunities: repeated
-ticks cannot turn intermittent assistance into certain assistance or spam pulses.
-Gate freezes preserve that opportunity. `SeededRng` provides reproducible
-SplitMix64, or callers can inject their own `RandomSource`.
+Reminders repeat while the eligible no-check gap continues. Each interval samples
+±10% jitter **once** and makes **one** probability draw when due, even when that
+opportunity is skipped. At Ramp 5 s with midpoint jitter, pulses occur at 5, 10,
+15 s, etc. High tick rates do not retry a skipped interval. Late ticks start the
+next interval from the observed eligible gap, never emit catch-up bursts. Checks
+restart the interval; sustained minimap viewing holds the gap at zero. Gate
+freezes preserve interval progress; death/loading/end reset it.
+
+Ramp always uses the selected level delay. Its previous +750 ms staircase after
+each pulse would steadily defeat the selected cadence, so the density cap now
+only adapts **Fade** levels. In Fade, the nominal delay remains
+`max(level_delay, staircase_delay)` when the cap is on (default). The staircase
+starts at the level delay, rises 750 ms after each emitted pulse, and falls 250 ms
+after each unprompted check, saturating at zero. With the cap off, Fade uses its
+level delay. Probability, jitter, level definitions and off levels are unchanged.
+`SeededRng` provides reproducible SplitMix64, or callers can inject their own
+`RandomSource`.
 
 ## Metrics and persistence
 
@@ -86,11 +95,15 @@ Definitions:
 - Mean dwell uses completed confirmed glances; `finish` closes the current glance
   at the last observed frame. Live snapshots omit the still-open dwell.
 - **U**: checks outside the inclusive 3 s post-pulse window / all checks.
+- Every emitted reminder counts as a pulse, including repeats within one gap;
+  skipped opportunities do not count. Stored summaries retain each pulse event.
 - Pulse-to-glance latency pairs the most recent outstanding pulse with the next
   check, even if it is outside the prompted window. Unanswered pulses have no
   latency, not zero latency.
 - Anticipation share: unprompted checks in the inclusive last 1 s before the
-  sampled pulse deadline / all unprompted checks. Off levels have no deadline.
+  next sampled pulse deadline / all unprompted checks. For repeats this is the
+  interval start plus its delay on the eligible gap clock, not the first interval's
+  delay. Off levels have no deadline.
 - Blind death: most recent valid minimap evidence at least 8 s ago (configurable),
   or no observed check with at least a full threshold window of session history.
   A more recent check is seen; insufficient history without a check is unknown.

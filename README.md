@@ -5,8 +5,8 @@ League of Legends. It aims to help you build the habit of checking the minimap,
 then get out of the way as that habit becomes natural.
 
 Webcam gaze tracking estimates whether you glanced at the minimap. After a gap
-without a glance, an amber ripple pulses around the map; sound is optional and
-off by default. Training levels shorten the gap, then fade the help; level changes
+without a glance, an amber ripple pulses around the map and repeats at the selected
+reminder interval until you look; sound is optional and off by default. Training levels shorten the gap, then fade the help; level changes
 are currently manual. The game's local Live Client Data API gates pulses to
 gameplay.
 
@@ -81,7 +81,14 @@ can also be built and checked on Linux. Builds will initially be unsigned.
 3. **Choose your level** in the tray or **Settings…**: start at 10 s, then manually
    move through 8 → 6 → 5 s. Fade levels keep the 5 s goal but delay and soften the
    help, make it intermittent, then turn it off. A saved level applies **next game**,
-   never mid-game. Settings also offers pulse style, colour and sound (off by default),
+   never mid-game. While you keep looking away, reminders repeat: at the 5 s Ramp
+   setting, expect roughly 5, 10, 15 s, and so on (each interval has ±10% jitter).
+   A minimap check hides the current pulse and restarts the interval; no reminders
+   run while you keep looking at the map. Lost tracking or foreground pauses the
+   clock. Strong/Medium cues have thicker, brighter strokes sized for the minimap,
+   including on 4K displays; Soft/Minimal stay subtle. The density cap only slows
+   Fade levels, not your selected Ramp cadence. Settings also offers pulse style,
+   colour and sound (off by default),
    **Open data folder** and confirmed **Delete all data**.
 4. **Try a solo game.** Arm **Next game solo (no pulses)** before starting. The tray
    tooltip announces it when armed and when play starts. That game has no visual or

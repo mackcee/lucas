@@ -100,8 +100,24 @@ most that same bounded tracking credit.
 Only alive, supported Summoner's Rift play after 1:30, League foreground,
 validated geometry and usable gaze advance the clock. Foreground/tracking loss
 freeze it; death/loading/end reset it. Sustained minimap viewing hides the pulse
-and does not create repeated checks. The core policy supplies level-dependent,
-jittered delays and the density cap, not a new app timer.
+and does not create repeated checks. A check restarts the reminder interval;
+while looking away, a new reminder opportunity occurs every interval, including
+after a skipped probabilistic reminder. Ramp 5 s therefore repeats around 5, 10,
+15 s without a check, with independently sampled ±10% jitter per interval. Late
+ticks never replay missed reminders in a burst. Baseline/Graduated and solo games
+remain silent. The core policy, not a new app timer, supplies this schedule.
+
+Ramp keeps its selected cadence even with the density cap enabled. The adaptive
++750 ms per pulse / −250 ms per unprompted check staircase now applies only in
+Fade, where existing delays, probabilities and jitter still apply. Strong and
+Medium strokes scale with minimap size and are brighter; their two ripple waves
+fade more slowly within the same 1.2-second animation. Soft/Minimal, the transparent
+map interior, click-through behaviour, style/colour selection and optional sound
+are preserved. Each emitted repeat increments the summary's pulse count and is
+stored as its own event; pulse-to-glance latency uses the most recent pulse.
+
+If Settings says 5 s but a completed game's card says 10 s, check the game's
+level snapshot: changing the level during that game only affects the next match.
 
 Runtime capture requires an available calibration model and a running game in
 gaze mode or a solo game. Without a model, the tray continues ticking with

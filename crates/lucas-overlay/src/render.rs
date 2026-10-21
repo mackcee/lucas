@@ -70,8 +70,8 @@ pub fn frame(surface: Surface, pulse: Pulse, elapsed: Duration) -> Result<Pixmap
     let (opacity, width) = match pulse.salience {
         Salience::Minimal => (0.24, 1.0),
         Salience::Soft => (0.42, 1.5),
-        Salience::Medium => (0.68, 2.5),
-        Salience::Strong => (0.92, 4.0),
+        Salience::Medium => (0.90, 4.0),
+        Salience::Strong => (1.0, 6.0),
     };
     let margin = surface.margin as f32;
     let map = tiny_skia::Rect::from_ltrb(
@@ -81,7 +81,17 @@ pub fn frame(surface: Surface, pulse: Pulse, elapsed: Duration) -> Result<Pixmap
         surface.height as f32 - margin,
     )
     .expect("validated surface has a positive map size");
+    // Geometry is in physical pixels, not DIPs. Scale the stronger strokes
+    // with minimap size so a 4K map does not get the same hairline as a small
+    // desktop. Keep Soft/Minimal unchanged and the existing surface footprint.
+    let prominent = matches!(pulse.salience, Salience::Strong | Salience::Medium);
+    let width = if prominent {
+        width * (map.width().min(map.height()) / 200.0).clamp(1.0, 2.5)
+    } else {
+        width
+    };
     let base = 3.0 + width / 2.0;
+    let travel = (map.width().min(map.height()) * 0.2).min(margin - base - width / 2.0 - 6.0);
     match pulse.style {
         PulseStyle::Ripple => {
             let count = pulse.ripple_count();
@@ -94,8 +104,15 @@ pub fn frame(surface: Surface, pulse: Pulse, elapsed: Duration) -> Result<Pixmap
                 if !(0.0..1.0).contains(&phase) {
                     continue;
                 }
-                let expansion = base + map.width().min(map.height()) * 0.2 * phase;
-                let alpha = opacity * (phase / 0.08).min(1.0) * (1.0 - phase).powi(2);
+                let expansion = base + travel * phase;
+                // Keep the two waves visible longer, rather than spending most
+                // of the 1.2-second cue as an almost-transparent outline.
+                let fade = if prominent {
+                    1.0 - phase
+                } else {
+                    (1.0 - phase).powi(2)
+                };
+                let alpha = opacity * (phase / 0.08).min(1.0) * fade;
                 let path = PathBuilder::from_rect(expand(map, expansion));
                 glow(&mut image, &path, pulse, width, alpha);
             }

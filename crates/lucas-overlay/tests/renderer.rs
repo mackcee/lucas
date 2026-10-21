@@ -94,6 +94,33 @@ fn generate_golden_candidates() {
     }
 }
 
+/// Physical-pixel captures for a representative 400px minimap on a 4K desktop.
+#[test]
+#[ignore = "explicit 4K review captures, requires LUCAS_GOLDEN_DIR"]
+fn generate_4k_review_frames() {
+    let directory = PathBuf::from(std::env::var_os("LUCAS_GOLDEN_DIR").unwrap());
+    std::fs::create_dir_all(&directory).unwrap();
+    let surface = Surface::for_target(Rect::new(3440.0, 1760.0, 3840.0, 2160.0).unwrap()).unwrap();
+    for style in STYLES {
+        for salience in SALIENCES {
+            for millis in [180, 540, 960] {
+                render::frame(
+                    surface,
+                    Pulse {
+                        style,
+                        salience,
+                        ..Pulse::default()
+                    },
+                    Duration::from_millis(millis),
+                )
+                .unwrap()
+                .save_png(directory.join(format!("4k-{style:?}-{salience:?}-{millis}.png")))
+                .unwrap();
+            }
+        }
+    }
+}
+
 #[test]
 fn transparent_content_and_edges_at_every_phase_for_every_style_and_salience() {
     let surface = surface();
@@ -138,6 +165,73 @@ fn transparent_content_and_edges_at_every_phase_for_every_style_and_salience() {
                 }
                 if millis == 0 || millis == 1200 {
                     assert!(image.data().iter().all(|b| *b == 0));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn prominent_4k_ripples_have_bright_thick_cores_without_expanding_the_surface() {
+    let surface = Surface::for_target(Rect::new(3440.0, 1760.0, 3840.0, 2160.0).unwrap()).unwrap();
+    assert_eq!(surface.margin(), 92);
+    for (salience, minimum_core_pixels) in [(Salience::Strong, 9), (Salience::Medium, 6)] {
+        let image = render::frame(
+            surface,
+            Pulse {
+                salience,
+                ..Pulse::default()
+            },
+            Duration::from_millis(180),
+        )
+        .unwrap();
+        let bright_pixels = (0..surface.margin())
+            .filter(|x| image.pixel(*x, surface.height() / 2).unwrap().alpha() >= 170)
+            .count();
+        assert!(
+            bright_pixels >= minimum_core_pixels,
+            "{salience:?}: {bright_pixels}"
+        );
+    }
+}
+
+#[test]
+fn large_map_frames_keep_content_and_surface_edges_clear() {
+    for size in [400.0, 800.0] {
+        let surface = Surface::for_target(Rect::new(0.0, 0.0, size, size).unwrap()).unwrap();
+        for style in STYLES {
+            for salience in SALIENCES {
+                for millis in [60, 540, 960, 1140] {
+                    let image = render::frame(
+                        surface,
+                        Pulse {
+                            style,
+                            salience,
+                            ..Pulse::default()
+                        },
+                        Duration::from_millis(millis),
+                    )
+                    .unwrap();
+                    for y in 0..surface.height() {
+                        for x in 0..surface.width() {
+                            let m = surface.margin();
+                            let in_map = x >= m
+                                && x < surface.width() - m
+                                && y >= m
+                                && y < surface.height() - m;
+                            let on_edge = x == 0
+                                || y == 0
+                                || x + 1 == surface.width()
+                                || y + 1 == surface.height();
+                            if in_map || on_edge {
+                                assert_eq!(
+                                    image.pixel(x, y).unwrap().alpha(),
+                                    0,
+                                    "{size}/{style:?}/{salience:?}/{millis} at {x},{y}"
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

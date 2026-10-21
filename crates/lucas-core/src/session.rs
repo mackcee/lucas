@@ -198,7 +198,7 @@ impl<R: RandomSource> Session<R> {
             tracking,
             looking,
             check_started: glance.check_started,
-            effective_delay_ms: self.policy.effective_delay_ms(),
+            effective_delay_ms: self.policy.next_due_gap_ms(),
         })?;
         let previous_gate = GateInputs {
             game_time_ms: gate.game_time_ms,
