@@ -419,7 +419,7 @@ impl Runtime {
                 tracking,
                 looking,
                 check_started,
-                effective_delay_ms: s.policy.effective_delay_ms(),
+                effective_delay_ms: s.policy.next_due_gap_ms(),
             })?;
             if let Some(glance) = completed {
                 s.metrics.record_glance(glance);

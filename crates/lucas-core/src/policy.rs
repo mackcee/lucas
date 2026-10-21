@@ -105,7 +105,7 @@ pub struct PulsePolicy {
     cap_enabled: bool,
     staircase_ms: u64,
     due_ms: Option<u64>,
-    attempted: bool,
+    interval_start_ms: u64,
     last_at: Option<Timestamp>,
 }
 
@@ -117,7 +117,7 @@ impl PulsePolicy {
             cap_enabled,
             staircase_ms: level.pulse_delay_ms.unwrap_or(0),
             due_ms: None,
-            attempted: false,
+            interval_start_ms: 0,
             last_at: None,
         })
     }
@@ -131,6 +131,19 @@ impl PulsePolicy {
         self.due_ms
     }
 
+    /// Next opportunity on the eligible gap clock, for anticipation metrics.
+    /// Unlike the interval duration, this includes earlier missed intervals.
+    pub fn next_due_gap_ms(&self) -> Option<u64> {
+        self.due_ms
+            .map(|delay| self.interval_start_ms.saturating_add(delay))
+    }
+
+    fn adaptive_cap(&self) -> bool {
+        // Ramp is explicit cadence training: a 5-second selection must not
+        // silently grow slower after every reminder. Retain fading's cap.
+        self.cap_enabled && self.level.phase == Phase::Fade
+    }
+
     /// Explicit level changes restart the cap and current opportunity. They do
     /// not fabricate a glance or change the gap clock. No automatic promotion.
     pub fn set_level(&mut self, level: TrainingLevel) -> Result<(), CoreError> {
@@ -142,24 +155,23 @@ impl PulsePolicy {
     }
     pub fn reset_gap(&mut self) {
         self.due_ms = None;
-        self.attempted = false;
+        self.interval_start_ms = 0;
     }
 
     pub fn on_check(&mut self, unprompted: bool) {
-        if self.cap_enabled && unprompted {
+        if self.adaptive_cap() && unprompted {
             self.staircase_ms = self.staircase_ms.saturating_sub(250);
         }
         self.reset_gap();
     }
 
-    /// Sample jitter once per gap, not once per tick. Apply ±10% jitter to
-    /// max(level delay, staircase delay); the cap is the nominal delay floor.
-    /// There is at most one opportunity per gap, even if probability skips it.
-    /// This prevents high tick rates turning intermittent help into certainty.
+    /// Sample jitter once per reminder interval, not once per tick. Fade uses
+    /// max(level delay, staircase delay) when capped; Ramp keeps its level delay.
+    /// Each interval has one probability draw, including skipped reminders.
     pub fn prepare_gap(&mut self, rng: &mut impl RandomSource) -> Option<u64> {
         let base = self.level.pulse_delay_ms?;
         if self.due_ms.is_none() {
-            let nominal = if self.cap_enabled {
+            let nominal = if self.adaptive_cap() {
                 base.max(self.staircase_ms)
             } else {
                 base
@@ -178,20 +190,23 @@ impl PulsePolicy {
     ) -> Result<Option<Pulse>, CoreError> {
         elapsed(self.last_at, at)?;
         self.last_at = Some(at);
-        if !eligible || self.attempted {
+        if !eligible {
             return Ok(None);
         }
         let Some(delay) = self.prepare_gap(rng) else {
             return Ok(None);
         };
-        if gap_ms < delay {
+        if gap_ms.saturating_sub(self.interval_start_ms) < delay {
             return Ok(None);
         }
-        self.attempted = true;
+        // Start the next interval even when probability skips this one. Anchor
+        // to the observed gap, so a late caller never emits catch-up bursts.
+        self.interval_start_ms = gap_ms;
+        self.due_ms = None;
         if unit(rng) >= self.level.pulse_probability {
             return Ok(None);
         }
-        if self.cap_enabled {
+        if self.adaptive_cap() {
             self.staircase_ms = self.staircase_ms.saturating_add(750);
         }
         Ok(Some(Pulse {

@@ -97,7 +97,7 @@ proptest! {
     fn staircase_matches_weighted_up_down_and_never_wraps(
         operations in prop::collection::vec(0u8..3, 1..500)
     ) {
-        let mut policy = PulsePolicy::new(TRAINING_LEVELS[1], true).unwrap();
+        let mut policy = PulsePolicy::new(TRAINING_LEVELS[7], true).unwrap();
         let mut expected = 10_000u64;
         for (index, op) in operations.into_iter().enumerate() {
             match op {

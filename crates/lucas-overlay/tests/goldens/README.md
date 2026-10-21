@@ -12,7 +12,13 @@ rounds out to 201 × 201 content pixels plus a 53-pixel margin on each side.
 Initial candidates were generated on Linux with tiny-skia 0.11.4 and visually
 reviewed together on a dark neutral ground: clear map interior, outward-growing
 rings, two at medium/strong versus one at soft/minimal, and visibly declining
-width/intensity. The normal test compares decoded pixels exactly. Encoding and
+width/intensity. Medium/Strong fixtures were refreshed for repeating reminders:
+thicker size-scaled cores, higher opacity, and a slower ripple fade, retaining
+the original surface bounds. Soft/Minimal fixtures are unchanged. The external
+4K review generator in `tests/renderer.rs` captures 400px map surroundings at the
+same three phases; independent tests enforce clear map/outer-edge pixels on
+400/800px targets and a minimum bright core width.
+The normal test compares decoded pixels exactly. Encoding and
 decoding both sides accounts for PNG's straight-alpha representation.
 
 To update intentionally, generate **candidates** into a scratch directory:

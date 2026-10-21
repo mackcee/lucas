@@ -290,6 +290,161 @@ fn replay_checks_pulses_unknown_spans_and_stored_blind_seen_unknown_deaths() {
 }
 
 #[test]
+fn five_second_repeats_hide_on_check_restart_after_view_and_survive_storage() {
+    let model = fitted();
+    let [l, t, r, b] = model.screen().minimap;
+    let map = [(l + r) / 2.0, (t + b) / 2.0];
+    let mut runtime = Runtime::new(Settings {
+        level_index: 4,
+        density_cap: true,
+        ..Settings::default()
+    })
+    .unwrap();
+    // Opt-in artifacts exercise the real runtime and renderer with synthetic
+    // game/gaze inputs; they do not claim native Windows/webcam acceptance.
+    let evidence = std::env::var_os("LUCAS_TEST_EVIDENCE_DIR").map(std::path::PathBuf::from);
+    let surface = lucas_overlay::render::Surface::for_target(
+        lucas_overlay::Rect::new(0.0, 0.0, 400.0, 400.0).unwrap(),
+    )
+    .unwrap();
+    if let Some(directory) = &evidence {
+        std::fs::create_dir_all(directory).unwrap();
+        std::fs::create_dir(directory.join("repeat-frames")).unwrap();
+    }
+    let mut active_animation = None;
+    let mut timeline = Vec::new();
+    let mut pulses = Vec::new();
+    for ms in (0..=26_000).step_by(50) {
+        let now = Duration::from_millis(ms);
+        if ms % 1000 == 0 {
+            runtime
+                .poll(
+                    now,
+                    Some(&snapshot(100.0 + ms as f64 / 1000.0, false, vec![])),
+                    1_000_000 + ms,
+                )
+                .unwrap();
+            if ms == 0 {
+                ready(&mut runtime, model.clone());
+            }
+        }
+        // Look during the third animation, not after its natural expiry.
+        let looking = (16_000..19_000).contains(&ms);
+        let tick = runtime
+            .tick(
+                now,
+                inputs(),
+                Some(sample(ms, if looking { map } else { [0.5, 0.5] })),
+                1_000_000 + ms,
+            )
+            .unwrap();
+        if let Some(pulse) = tick.pulse {
+            assert!(!tick.hide);
+            assert!((4_500..=5_500).contains(&pulse.effective_delay_ms));
+            pulses.push(ms);
+        }
+        if (16_100..19_000).contains(&ms) {
+            assert!(tick.hide);
+            assert_eq!(tick.gap_ms, 0);
+            assert!(tick.pulse.is_none());
+        }
+        if let Some(directory) = &evidence {
+            if tick.hide {
+                active_animation = None;
+            } else if let Some(pulse) = tick.pulse {
+                active_animation = Some((
+                    ms,
+                    lucas_overlay::Pulse {
+                        salience: pulse.salience,
+                        ..lucas_overlay::Pulse::default()
+                    },
+                ));
+            }
+            let (started, visual) = active_animation.unwrap_or((ms, Default::default()));
+            let image =
+                lucas_overlay::render::frame(surface, visual, Duration::from_millis(ms - started))
+                    .unwrap();
+            let visible = image.pixels().iter().any(|p| p.alpha() != 0);
+            if tick.hide {
+                assert!(!visible);
+            }
+            image
+                .save_png(
+                    directory
+                        .join("repeat-frames")
+                        .join(format!("{:04}.png", ms / 50)),
+                )
+                .unwrap();
+            timeline.push(serde_json::json!({
+                "elapsed_ms": ms,
+                "looking_at_map": looking,
+                "status": format!("{:?}", tick.status),
+                "eligible_gap_ms": tick.gap_ms,
+                "hide": tick.hide,
+                "pulse": tick.pulse.is_some(),
+                "rendered_visible": visible,
+                "effective_delay_ms": tick.pulse.map(|p| p.effective_delay_ms),
+            }));
+        }
+    }
+    assert_eq!(pulses.len(), 4, "{pulses:?}");
+    assert!((4_500..=5_550).contains(&pulses[0]));
+    for pair in pulses[..3].windows(2) {
+        assert!((4_500..=5_550).contains(&(pair[1] - pair[0])));
+    }
+    assert!(pulses[2] < 16_000 && pulses[2] + 1_200 > 16_100);
+    assert!((23_500..=24_550).contains(&pulses[3]));
+    runtime
+        .finish(Duration::from_millis(26_000), 1_026_000)
+        .unwrap();
+    let summaries = runtime.take_summaries();
+    let summary = &summaries[0];
+    assert_eq!(summary.metrics.pulses, 4);
+    assert_eq!(summary.metrics.checks, 1);
+    assert_eq!(
+        summary
+            .events
+            .iter()
+            .filter(|e| matches!(e.kind, StoredEventKind::Pulse))
+            .count(),
+        4
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open_in(dir.path()).unwrap();
+    store.save_summary(summary).unwrap();
+    assert_eq!(store.summary(&summary.id).unwrap().as_ref(), Some(summary));
+    if let Some(directory) = &evidence {
+        let fixture = directory.join("repeat-store");
+        assert!(!fixture.exists(), "refusing to overwrite evidence");
+        let mut store = Store::open_in(&fixture).unwrap();
+        store.save_summary(summary).unwrap();
+        drop(store);
+        let persisted = Store::open_in(&fixture)
+            .unwrap()
+            .summary(&summary.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&persisted, summary);
+        std::fs::write(
+            directory.join("repeat-summary.json"),
+            serde_json::to_vec_pretty(&persisted).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            directory.join("repeat-timeline.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "synthetic_gaze_and_api_not_native_webcam_acceptance": true,
+                "scenario": "Ramp 5 seconds, density cap on; look away 0–16 s; view map 16–19 s (cancel active pulse); look away 19–26 s",
+                "pulse_elapsed_ms": pulses,
+                "ticks": timeline,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn failed_poll_makes_outage_deaths_unknown_but_preserves_earlier_evidence() {
     let model = fitted();
     let [l, t, r, b] = model.screen().minimap;

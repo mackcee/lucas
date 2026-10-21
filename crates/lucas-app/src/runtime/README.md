@@ -100,8 +100,18 @@ most that same bounded tracking credit.
 Only alive, supported Summoner's Rift play after 1:30, League foreground,
 validated geometry and usable gaze advance the clock. Foreground/tracking loss
 freeze it; death/loading/end reset it. Sustained minimap viewing hides the pulse
-and does not create repeated checks. The core policy supplies level-dependent,
-jittered delays and the density cap, not a new app timer.
+and does not create repeated checks. The runtime delegates repeating reminders
+to the [core pulse policy](../../../lucas-core/README.md#manual-programme-and-pulse-policy),
+not a separate app timer. That reference owns cadence, jitter, skipped intervals
+and the Fade-only cap. Solo games suppress delivery regardless of policy.
+
+The [overlay reference](../../../lucas-overlay/README.md#visuals) owns salience,
+size scaling and animation. Repeats use the same event persistence path and
+[core metrics definitions](../../../lucas-core/README.md#metrics-and-persistence)
+as other pulses.
+
+If Settings says 5 s but a completed game's card says 10 s, check the game's
+level snapshot: changing the level during that game only affects the next match.
 
 Runtime capture requires an available calibration model and a running game in
 gaze mode or a solo game. Without a model, the tray continues ticking with

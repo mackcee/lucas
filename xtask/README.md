@@ -20,9 +20,10 @@ Each game creates a fresh `lucas_core::Session`. Synthetic high-quality gaze
 samples at 50 ms intervals pass through the **production detector, eligible-time
 gap clock, pulse policy and metrics**. There is no replacement policy or scoring
 formula in xtask. Core supplies its default dwell/hysteresis, ±10% delay jitter,
-one opportunity per gap, response attribution, and density staircase. The cap
-starts fresh each game, as does the session; no automatic level progression is
-simulated.
+one opportunity per repeating interval, response attribution, and the Fade-only
+density staircase. Ramp keeps its selected cadence with either cap setting.
+The cap starts fresh each game, as does the session; no automatic level
+progression is simulated.
 
 The model intentionally isolates pulse load from camera and game integration:
 
@@ -70,9 +71,10 @@ reproduce those obsolete settings.
 - **Pulses/game:** total emitted pulses / number of games.
 - **Gaps prompted:** fraction of assisted positive gaps that received a pulse,
   including unanswered pulses. Positive initial and terminal censored gaps are
-  included. Because core emits at most one pulse per gap, this is total pulses /
-  total gaps. It is **not** `1 − U`, which counts checks in core's post-pulse
-  attribution window instead.
+  included. Multiple reminders in one gap count as **one prompted gap**, while
+  each reminder counts toward pulses/game. The share therefore stays within
+  [0,1] even when reminders go unanswered. It is **not** `1 − U`, which counts
+  checks in core's post-pulse attribution window instead.
 - **Solo blind:** time-weighted unassisted blind fraction at the row's S,
   `(eligible_ms − compliant_ms) / eligible_ms`. A separate paired run uses the
   same habit seeds but discards *all* pulse outputs rather than delivering them
@@ -94,30 +96,29 @@ cargo clippy -p xtask --all-targets -- -D warnings
 ```
 
 These tests also run in the existing Linux and Windows workspace CI jobs.
-The main regression uses six 30-minute games per habit, preserving the density
-staircase's settling time. It compares pulses to the design plan §13 P4 within
-±25%, and solo blind time within four percentage points. For means ≥10 s it
-also requires capped load to be 30–75% of uncapped load. Tests cover the approved
-fade levels, zero-assistance levels, gamma mean/variance, response timing,
-seed/order reproducibility, exact eligible duration, and CLI validation.
+The main regression uses six 30-minute games per habit. It compares Ramp pulses
+to the repeating-policy anchors in [`src/regression.rs`](src/regression.rs)
+within ±25%, and analytical solo blind time within four percentage points.
+Ramp cap-on/off loads must be identical.
+A separate Fade level 7 regression uses means 15/20 s and requires capped load
+to remain 30–75% of uncapped load, preserving staircase settling time. Tests also
+cover repeated unanswered reminders as a single prompted gap, the approved fade
+levels, zero-assistance levels, gamma mean/variance, response timing, seed/order
+reproducibility, exact eligible duration, and CLI validation.
 
-For orientation, `cargo xtask sim --cap both` (seed 42, default 20 games) gives:
+Generate current load estimates directly from the simulator rather than a copied
+output table:
 
-| Habit mean | Pulses/game off / on | Solo blind at S=10 |
-| --- | --- | --- |
-| 4 s | 15.4 / 15.4 | 1.9% |
-| 6 s | 46.2 / 46.1 | 8.8% |
-| 8 s | 69.0 / 62.8 | 17.1% |
-| 10 s | 85.3 / 56.1 | 25.6% |
-| 15 s | 102.5 / 46.7 | 43.5% |
-| 20 s | 111.0 / 45.5 | 54.0% |
+```sh
+cargo xtask sim --cap both
+cargo xtask sim --games 6 --cap both --levels 7
+```
 
-The historical anchors are about 85 uncapped pulses for the 10-second habit,
-and about 105 → 47 with the cap for the 15-second habit. Small differences are
-expected from sampling, glance timing, and using the real detector and policy
-instead of the discarded prototype. Bands are intentionally not golden exact
-counts; a policy change that floods players should fail the tests without
-requiring every harmless timing change to update a snapshot.
+The first command compares Ramp cap settings; the second exercises Fade.
+These are synthetic load estimates, not real-game efficacy evidence. The
+regression anchors replace the old one-shot prototype references; bands are
+intentionally not golden exact counts, so harmless timing changes need not update
+a snapshot.
 
 ## G2 calibration and glance evaluation
 

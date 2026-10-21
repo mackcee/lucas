@@ -84,6 +84,8 @@ pub struct MetricsObservation {
     pub tracking: bool,
     pub looking: bool,
     pub check_started: bool,
+    /// Next reminder's deadline measured from the start of the eligible gap,
+    /// not just the duration of the current repeating interval.
     pub effective_delay_ms: Option<u64>,
 }
 

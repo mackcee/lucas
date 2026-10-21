@@ -1,4 +1,4 @@
-//! Design plan §13 P4: approximate load, not bit-for-bit prototype parity.
+//! Repeating-reminder load: broad seeded simulation bands, not player evidence.
 use crate::sim::{Config, run};
 
 fn band(label: &str, actual: f64, low: f64, high: f64) {
@@ -9,14 +9,11 @@ fn band(label: &str, actual: f64, low: f64, high: f64) {
 }
 
 #[test]
-fn pulse_load_and_unassisted_blind_time_stay_in_reference_bands() {
-    // Six full games retain staircase settling time while staying fast in CI.
-    // Reference (20 x 30 min, gamma k=2, 80% response, S=10):
-    // mean:             4     6     8     10     15     20
-    // uncapped pulses: 18.7  49.8  69.6   85.2  104.7  110.3
-    // capped pulses:    --   44.6  55.8   54.3   46.5   44.2
-    // solo blind:      .023 .093  .181   .268   .443     --
-    // Allow sampling, dwell, detector confirmation and prototype differences.
+fn repeating_ramp_load_and_unassisted_blind_time_stay_in_reference_bands() {
+    // Six full games keep CI fast. Repeating policy reference measured with
+    // 20 x 30 min, seed 42, gamma k=2, 80% response, S=10. The old one-shot
+    // prototype's pulse anchors/cap reduction no longer describe Ramp.
+    // Keep broad sampling bands; solo blind anchors remain analytical.
     let config = Config {
         games: 6,
         caps: vec![false, true],
@@ -24,15 +21,15 @@ fn pulse_load_and_unassisted_blind_time_stay_in_reference_bands() {
     };
     let rows = run(&config).unwrap();
     let references = [
-        (18.7, None, 0.023),
-        (49.8, Some(44.6), 0.093),
-        (69.6, Some(55.8), 0.181),
-        (85.2, Some(54.3), 0.268),
-        (104.7, Some(46.5), 0.443),
+        (15.8, 0.023),
+        (46.6, 0.093),
+        (70.3, 0.181),
+        (89.8, 0.268),
+        (118.5, 0.443),
         // Gamma renewal limit at mean=20, S=10: exp(-1)*(1+1/2).
-        (110.3, Some(44.2), 0.552),
+        (134.2, 0.552),
     ];
-    for (pair, (uncapped_ref, capped_ref, blind_ref)) in rows.chunks_exact(2).zip(references) {
+    for (pair, (uncapped_ref, blind_ref)) in rows.chunks_exact(2).zip(references) {
         let uncapped = &pair[0];
         let capped = &pair[1];
         let label = format!("mean {}s", uncapped.mean);
@@ -42,14 +39,8 @@ fn pulse_load_and_unassisted_blind_time_stay_in_reference_bands() {
             uncapped_ref * 0.75,
             uncapped_ref * 1.25,
         );
-        if let Some(reference) = capped_ref {
-            band(
-                &format!("{label} capped pulses"),
-                capped.pulses_per_game,
-                reference * 0.75,
-                reference * 1.25,
-            );
-        }
+        assert_eq!(uncapped.pulses_per_game, capped.pulses_per_game);
+        assert_eq!(uncapped.prompted_gap_share, capped.prompted_gap_share);
         band(
             &format!("{label} solo blind"),
             uncapped.unassisted_blind_share,
@@ -72,15 +63,31 @@ fn pulse_load_and_unassisted_blind_time_stay_in_reference_bands() {
                 .prompted_gap_share
                 .is_some_and(|s| (0.0..=1.0).contains(&s))
         );
-        if uncapped.mean >= 10.0 {
-            band(
-                &format!("{label} cap reduction"),
-                capped.pulses_per_game / uncapped.pulses_per_game,
-                0.30,
-                0.75,
-            );
-            assert!(capped.prompted_gap_share < uncapped.prompted_gap_share);
-        }
+    }
+}
+
+#[test]
+fn fade_staircase_still_reduces_load_with_repeating_reminders() {
+    let config = Config {
+        games: 6,
+        means: vec![15.0, 20.0],
+        levels: vec![7],
+        caps: vec![false, true],
+        ..Config::default()
+    };
+    for pair in run(&config).unwrap().chunks_exact(2) {
+        let (uncapped, capped) = (&pair[0], &pair[1]);
+        band(
+            "Fade cap reduction",
+            capped.pulses_per_game / uncapped.pulses_per_game,
+            0.30,
+            0.75,
+        );
+        assert!(capped.prompted_gap_share < uncapped.prompted_gap_share);
+        assert_eq!(
+            uncapped.unassisted_blind_share,
+            capped.unassisted_blind_share
+        );
     }
 }
 

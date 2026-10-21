@@ -168,6 +168,7 @@ impl Player {
 struct Trial {
     metrics: GameMetrics,
     gaps: u64,
+    prompted_gaps: u64,
 }
 
 fn game(
@@ -192,6 +193,8 @@ fn game(
     )?;
     let mut now = 0;
     let mut gaps = 0;
+    let mut prompted_gaps = 0;
+    let mut gap_prompted = false;
     loop {
         let looking = player.looking(now);
         let update = session.observe(
@@ -211,14 +214,26 @@ fn game(
         )?;
         for event in update.events {
             match event.kind {
-                EventKind::Pulse(_) if deliver_pulses => player.pulse(now, config.response),
-                EventKind::Check(check) if check.gap_ms > 0 => gaps += 1,
+                EventKind::Pulse(_) => {
+                    gap_prompted = true;
+                    if deliver_pulses {
+                        player.pulse(now, config.response);
+                    }
+                }
+                EventKind::Check(check) => {
+                    if check.gap_ms > 0 {
+                        gaps += 1;
+                        prompted_gaps += u64::from(gap_prompted);
+                    }
+                    gap_prompted = false;
+                }
                 _ => {}
             }
         }
         if now == config.duration_ms {
             // Include the censored terminal gap, just as core gap statistics do.
             gaps += u64::from(update.gap_ms > 0);
+            prompted_gaps += u64::from(update.gap_ms > 0 && gap_prompted);
             break;
         }
         now = (now + TICK_MS).min(config.duration_ms);
@@ -226,6 +241,7 @@ fn game(
     Ok(Trial {
         metrics: session.finish(Timestamp(now))?.metrics,
         gaps,
+        prompted_gaps,
     })
 }
 
@@ -262,18 +278,20 @@ pub fn run(config: &Config) -> Result<Vec<Row>, CoreError> {
             for &cap in &config.caps {
                 let mut pulses = 0;
                 let mut gaps = 0;
+                let mut prompted_gaps = 0;
                 for game_index in 0..config.games {
                     let seed = game_seed(config.seed, mean, game_index);
                     let trial = game(config, mean, level, cap, seed, true)?;
                     pulses += trial.metrics.pulses;
                     gaps += trial.gaps;
+                    prompted_gaps += trial.prompted_gaps;
                 }
                 rows.push(Row {
                     mean,
                     level,
                     cap,
                     pulses_per_game: pulses as f64 / config.games as f64,
-                    prompted_gap_share: (gaps > 0).then(|| pulses as f64 / gaps as f64),
+                    prompted_gap_share: (gaps > 0).then(|| prompted_gaps as f64 / gaps as f64),
                     unassisted_blind_share: blind_ms as f64 / eligible_ms as f64,
                     unassisted_median_gap_seconds: median(&mut medians),
                 });
@@ -414,6 +432,21 @@ mod tests {
         assert_eq!(first[2..], reversed[..2]);
         config.seed += 1;
         assert_ne!(first, run(&config).unwrap());
+    }
+
+    #[test]
+    fn repeated_unanswered_pulses_count_as_one_prompted_gap() {
+        let config = Config {
+            games: 1,
+            duration_ms: 60_000,
+            means: vec![86_400.0],
+            levels: vec![4],
+            response: 0.0,
+            ..Config::default()
+        };
+        let row = &run(&config).unwrap()[0];
+        assert!((10.0..=13.0).contains(&row.pulses_per_game));
+        assert_eq!(row.prompted_gap_share, Some(1.0));
     }
 
     #[test]

@@ -398,8 +398,8 @@ mod policy {
         }
     }
     #[test]
-    fn jitter_is_sampled_once_and_cap_moves_by_exact_steps() {
-        let mut policy = PulsePolicy::new(TRAINING_LEVELS[1], true).unwrap();
+    fn fade_jitter_is_sampled_once_per_interval_and_cap_moves_by_exact_steps() {
+        let mut policy = PulsePolicy::new(TRAINING_LEVELS[7], true).unwrap();
         let mut rng = FixedRng(1 << 63); // unit = 0.5; nominal jitter.
         assert_eq!(policy.prepare_gap(&mut rng), Some(10_000));
         assert_eq!(policy.prepare_gap(&mut FixedRng(0)), Some(10_000));
@@ -433,6 +433,127 @@ mod policy {
         }
         assert_eq!(policy.staircase_ms(), 0);
         assert_eq!(policy.prepare_gap(&mut rng), Some(10_000));
+    }
+    #[test]
+    fn ramp_repeats_at_selected_cadence_with_or_without_cap() {
+        for cap in [false, true] {
+            for level in &TRAINING_LEVELS[1..=4] {
+                let delay = level.pulse_delay_ms.unwrap();
+                let mut policy = PulsePolicy::new(*level, cap).unwrap();
+                let mut rng = FixedRng(1 << 63);
+                for interval in 1..=10 {
+                    let due = delay * interval;
+                    assert!(
+                        policy
+                            .tick(Timestamp(due - 1), due - 1, true, &mut rng)
+                            .unwrap()
+                            .is_none()
+                    );
+                    let pulse = policy
+                        .tick(Timestamp(due), due, true, &mut rng)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(pulse.effective_delay_ms, delay);
+                    assert_eq!(policy.staircase_ms(), delay);
+                }
+                policy.on_check(false);
+                assert!(
+                    policy
+                        .tick(Timestamp(delay * 11), delay - 1, true, &mut rng)
+                        .unwrap()
+                        .is_none()
+                );
+                assert!(
+                    policy
+                        .tick(Timestamp(delay * 11 + 1), delay, true, &mut rng)
+                        .unwrap()
+                        .is_some()
+                );
+            }
+        }
+    }
+    #[test]
+    fn skipped_interval_retries_only_after_another_full_jittered_interval() {
+        let mut policy = PulsePolicy::new(TRAINING_LEVELS[8], true).unwrap();
+        // First interval is 16.5s and its probability draw skips the pulse.
+        assert!(
+            policy
+                .tick(Timestamp(16_500), 16_500, true, &mut FixedRng(u64::MAX))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(policy.prepare_gap(&mut FixedRng(0)), Some(13_500));
+        assert_eq!(policy.next_due_gap_ms(), Some(30_000));
+        assert!(
+            policy
+                .tick(Timestamp(29_999), 29_999, true, &mut FixedRng(0))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            policy
+                .tick(Timestamp(30_000), 30_000, true, &mut FixedRng(0))
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(policy.staircase_ms(), 15_750);
+    }
+    #[test]
+    fn fade_repeats_retain_level_delay_probability_and_optional_staircase() {
+        for cap in [false, true] {
+            for level in &TRAINING_LEVELS[5..=8] {
+                let base = level.pulse_delay_ms.unwrap();
+                let mut policy = PulsePolicy::new(*level, cap).unwrap();
+                let mut at = 0;
+                for interval in 0..3 {
+                    let nominal = base + if cap { interval * 750 } else { 0 };
+                    let delay = nominal * 9 / 10; // Fixed zero: lower jitter bound, passes all probabilities.
+                    at += delay;
+                    let pulse = policy
+                        .tick(Timestamp(at), at, true, &mut FixedRng(0))
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(pulse.effective_delay_ms, delay);
+                    assert_eq!(pulse.salience, level.salience);
+                }
+            }
+        }
+    }
+    #[test]
+    fn late_ticks_do_not_catch_up_in_bursts_and_gates_do_not_consume_repeats() {
+        let mut policy = PulsePolicy::new(TRAINING_LEVELS[4], true).unwrap();
+        let mut rng = FixedRng(1 << 63);
+        assert!(
+            policy
+                .tick(Timestamp(50_000), 50_000, true, &mut rng)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            policy
+                .tick(Timestamp(50_001), 50_001, true, &mut rng)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            policy
+                .tick(Timestamp(55_000), 55_000, false, &mut rng)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            policy
+                .tick(Timestamp(55_001), 55_000, true, &mut rng)
+                .unwrap()
+                .is_some()
+        );
+        policy.reset_gap();
+        assert!(
+            policy
+                .tick(Timestamp(60_000), 4_999, true, &mut rng)
+                .unwrap()
+                .is_none()
+        );
     }
     #[test]
     fn probability_skip_is_not_retried_on_every_frame() {
@@ -818,6 +939,135 @@ mod session_tests {
             record
         );
         assert!(!json.contains("p_minimap"));
+    }
+    #[test]
+    fn repeated_pulses_count_individually_and_check_pairs_with_latest() {
+        let mut s = Session::new(
+            "repeat",
+            SessionConfig::default(),
+            TRAINING_LEVELS[4],
+            FixedRng(1 << 63),
+        )
+        .unwrap();
+        for at in (0..=22_000).step_by(50) {
+            s.observe(
+                sample(
+                    at,
+                    if (15_500..17_000).contains(&at) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                ),
+                gate(),
+            )
+            .unwrap();
+        }
+        let record = s.finish(Timestamp(22_000)).unwrap();
+        let pulses: Vec<_> = record
+            .events
+            .iter()
+            .filter_map(|e| match e.kind {
+                EventKind::Pulse(_) => Some(e.at.0),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pulses, [5_000, 10_000, 15_000, 22_000]);
+        assert_eq!(record.metrics.pulses, 4);
+        assert_eq!(record.metrics.checks, 1);
+        assert_eq!(record.metrics.unprompted_checks, 0);
+        assert_eq!(record.metrics.median_pulse_to_glance_ms, Some(600.0));
+        let json = serde_json::to_string(&record).unwrap();
+        assert_eq!(
+            serde_json::from_str::<SessionRecord>(&json).unwrap(),
+            record
+        );
+    }
+    #[test]
+    fn repeat_progress_freezes_on_tracking_foreground_or_pause_and_resets_on_death() {
+        for (suppressed, second_pulse) in [
+            (
+                GateInputs {
+                    foreground: false,
+                    ..gate()
+                },
+                15_000,
+            ),
+            (
+                GateInputs {
+                    face_tracked: false,
+                    ..gate()
+                },
+                15_000,
+            ),
+            (
+                GateInputs {
+                    paused: true,
+                    ..gate()
+                },
+                15_000,
+            ),
+            (
+                GateInputs {
+                    alive: false,
+                    ..gate()
+                },
+                16_000,
+            ),
+        ] {
+            let mut s = Session::new(
+                "gated-repeat",
+                SessionConfig::default(),
+                TRAINING_LEVELS[4],
+                FixedRng(1 << 63),
+            )
+            .unwrap();
+            for at in (0..=16_000).step_by(50) {
+                s.observe(
+                    sample(at, 0.0),
+                    if (6_000..11_000).contains(&at) {
+                        suppressed
+                    } else {
+                        gate()
+                    },
+                )
+                .unwrap();
+            }
+            let pulses: Vec<_> = s
+                .events()
+                .iter()
+                .filter_map(|e| match e.kind {
+                    EventKind::Pulse(_) => Some(e.at.0),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(pulses, [5_000, second_pulse]);
+        }
+    }
+    #[test]
+    fn anticipation_uses_next_repeat_deadline_not_first_interval_duration() {
+        let mut s = Session::new(
+            "anticipation",
+            SessionConfig::default(),
+            TRAINING_LEVELS[4],
+            FixedRng(1 << 63),
+        )
+        .unwrap();
+        for at in (0..=9_600).step_by(50) {
+            s.observe(sample(at, if at >= 9_500 { 1.0 } else { 0.0 }), gate())
+                .unwrap();
+        }
+        let check = s
+            .events()
+            .iter()
+            .find_map(|e| match e.kind {
+                EventKind::Check(c) => Some(c),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!check.prompted);
+        assert!(check.anticipatory);
+        assert_eq!(check.pulse_latency_ms, Some(4_600));
     }
     #[test]
     fn suppressed_minimap_samples_do_not_produce_blind_deaths() {

@@ -58,10 +58,17 @@ and salience independently of scheduling. `Salience` is re-exported from
 |---|---:|---:|---:|
 | Minimal | 1 | 0.24 | 1 |
 | Soft | 1.5 | 0.42 | 1 |
-| Medium | 2.5 | 0.68 | 2 |
-| Strong | 4 | 0.92 | 2 |
+| Medium | 4 × scale | 0.90 | 2 |
+| Strong | 6 × scale | 1.00 | 2 |
 
-Ripples expand outward by 20% of the shorter map dimension, stagger, and fade.
+For Medium/Strong, `scale = clamp(shorter_map_side / 200, 1, 2.5)`: a 400 px
+minimap on a 4K desktop gets 8/12 px cores rather than 2.5/4 px hairlines.
+Their ripples fade linearly rather than quadratically, keeping both waves visible
+longer within the same 1.2-second animation. Soft/Minimal retain their old rendering.
+
+Ripples expand outward by up to 20% of the shorter map dimension, stagger, and
+fade. Travel is bounded to keep thicker strokes and glow inside the existing
+surface margin; the overlay does not cover a larger part of the game.
 Other data-selectable styles are breathing border, corner brackets, and a comet
 sweep. No tint/inner-fill style is provided: map content must remain unobscured.
 All styles leave every pixel intersecting the map transparent. The map bounds
@@ -119,7 +126,11 @@ cargo clippy -p lucas-overlay --all-targets -- -D warnings
 The cross-platform tests cover command ordering/lifecycle, bounded signed
 geometry, salience/fade/expansion, BGRA premultiplication, 21 committed PNG
 snapshots, and transparent content/outer edges across every style, salience, and
-21 animation phases. Golden fixtures are generated synthetic graphics, not game
+21 animation phases, plus physical-pixel 400/800 px maps and minimum bright-core
+width checks at 4K scale. To capture Strong/Medium before/after frames for review,
+set `LUCAS_GOLDEN_DIR` to an external scratch directory and run
+`cargo test -p lucas-overlay --test renderer generate_4k_review_frames -- --ignored --exact`.
+Golden fixtures are generated synthetic graphics, not game
 screenshots. See `tests/goldens/README.md` before changing them.
 
 On a **dedicated interactive Windows desktop** (the existing GitHub-hosted
