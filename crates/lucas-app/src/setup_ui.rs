@@ -212,7 +212,7 @@ impl Controls {
                 ui.add_space(12.0);
                 ui.strong("Your camera stays private.");
                 ui.label("Webcam frames are never stored and nothing leaves this PC. Only settings, calibration and per-game summaries with event timestamps are saved locally.");
-                ui.label("Setup covers your camera, Borderless mode and calibration. Closing discards unfinished changes; reopen from the tray to start again with your saved settings.");
+                ui.label("Setup covers your camera, Borderless mode and calibration. Closing discards unfinished changes, except screen size and distance remembered when calibration starts; reopen from the tray to start again with your saved settings.");
             }
             SetupStep::Camera => self.camera(ui),
             SetupStep::Borderless => {

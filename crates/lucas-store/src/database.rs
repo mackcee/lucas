@@ -66,6 +66,17 @@ impl Store {
         )
     }
 
+    /// Remember display choices without committing a setup draft or replacing
+    /// other preferences. Called when a full calibration starts.
+    pub fn save_calibration_preferences(
+        &self,
+        preferences: crate::CalibrationPreferences,
+    ) -> Result<()> {
+        let mut settings = self.load_settings()?;
+        settings.calibration = preferences;
+        self.save_settings(&settings)
+    }
+
     pub fn load_calibration(&self) -> Result<Option<Calibration>> {
         let bytes = match fs::read(self.directory.join("calibration.json")) {
             Ok(bytes) => bytes,

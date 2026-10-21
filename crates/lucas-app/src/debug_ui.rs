@@ -88,7 +88,7 @@ fn run_impl(
                 pending: None,
                 test: None,
                 requested: RunKind::Glance,
-                measurements: [531.0, 299.0, 650.0],
+                calibration_preferences: lucas_store::Store::open()?.load_settings()?.calibration,
                 calibration_result: None,
                 runtime_kind,
                 quick_snapshot,
@@ -181,7 +181,7 @@ pub(crate) struct DebugApp {
     pending: Option<Pending>,
     test: Option<Test>,
     requested: RunKind,
-    measurements: [f64; 3],
+    calibration_preferences: lucas_store::CalibrationPreferences,
     calibration_result: Option<String>,
     runtime_kind: Option<RunKind>,
     quick_snapshot: Option<String>,
@@ -192,7 +192,8 @@ pub(crate) struct DebugApp {
 }
 impl DebugApp {
     /// Reuses the actual calibration surface inside setup, with no second process
-    /// or camera owner. Setup alone commits settings when the wizard finishes.
+    /// or camera owner. Display preferences are remembered at calibration start;
+    /// setup commits its other settings and calibration when the wizard finishes.
     pub(crate) fn for_setup(
         window: std::sync::Arc<winit::window::Window>,
         models: PathBuf,
@@ -217,7 +218,10 @@ impl DebugApp {
             pending: None,
             test: None,
             requested: RunKind::Calibrate,
-            measurements: [531.0, 299.0, 650.0],
+            calibration_preferences: lucas_store::Store::open()
+                .and_then(|s| s.load_settings())
+                .map_err(|e| e.to_string())?
+                .calibration,
             calibration_result: None,
             runtime_kind: Some(RunKind::Calibrate),
             quick_snapshot: None,
@@ -476,8 +480,11 @@ impl DebugApp {
                     self.monitor.resolution,
                     minimap.settings(),
                     &alignments,
-                    [self.measurements[0], self.measurements[1]],
-                    self.measurements[2],
+                    self.calibration_preferences
+                        .physical_size_mm(self.monitor.resolution)
+                        .map_err(|e| e.to_string())?
+                        .map(f64::from),
+                    f64::from(self.calibration_preferences.viewing_distance_mm),
                 )
                 .map_err(|e| e.to_string())?;
                 let schedule = if self.requested == RunKind::Quick {
@@ -510,6 +517,11 @@ impl DebugApp {
                 let diagnostic_directory = (self.requested == RunKind::Calibrate)
                     .then(calibration_diagnostics::directory_from_env)
                     .flatten();
+                if self.requested == RunKind::Calibrate {
+                    lucas_store::Store::open()
+                        .and_then(|s| s.save_calibration_preferences(self.calibration_preferences))
+                        .map_err(|e| format!("Could not remember screen size and distance: {e}. Check local settings and retry."))?;
+                }
                 state.begin_calibration(
                     started,
                     schedule.duration(),
@@ -793,12 +805,7 @@ impl DebugApp {
                 } else {
                     ui.heading("Calibrate your minimap gaze");
                     ui.label("About 46 seconds. Follow the dots. Partway through, lean, turn and move a little closer or farther as you normally play. Keep following the dots as you move. Four final targets check the fit, including points just outside the minimap. Use your usual glasses and lighting.");
-                    ui.horizontal_wrapped(|ui| {
-                        for (label,value) in ["Screen width (mm)","Height (mm)","Assumed distance (mm)"].into_iter().zip(&mut self.measurements) {
-                            ui.horizontal(|ui| { ui.label(label); ui.add(egui::DragValue::new(value).range(100.0..=3000.0)); });
-                        }
-                    });
-                    ui.label("Defaults: 24-inch 16:9 screen, 650 mm viewing distance. Use your monitor's physical dimensions, not Windows scaling.");
+                    lucas_app::preferences::calibration_picker(ui, &mut self.calibration_preferences, self.monitor.resolution);
                     ui.label("By default, only weights and validation results are saved; calibration samples stay in memory. If you opted into local numeric diagnostic exports, see the notice above. No images are saved and nothing is uploaded.");
                 }
                 ui.horizontal(|ui| {

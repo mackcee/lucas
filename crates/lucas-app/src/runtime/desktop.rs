@@ -185,8 +185,12 @@ impl Desktop {
             let (_, setup) = self.controls.take().unwrap();
             self.delete_requested |=
                 status.code() == Some(crate::postgame::DELETE_REQUESTED_EXIT_CODE as i32);
-            if setup && !self.delete_requested {
-                self.reload()?;
+            if !self.delete_requested {
+                // Setup may remember display choices even if its draft is cancelled.
+                self.runtime.settings.calibration = Store::open()?.load_settings()?.calibration;
+                if setup {
+                    self.reload()?;
+                }
             }
             if status.success() {
                 let settings = Store::open()?.load_settings()?;
@@ -215,6 +219,9 @@ impl Desktop {
         {
             let task = self.calibration.take().unwrap();
             let outcome = CalibrationOutcome::from_code(status.code());
+            // Full calibration remembers display choices at start, even if it
+            // later fails. Keep subsequent tray settings writes from undoing it.
+            self.runtime.settings.calibration = Store::open()?.load_settings()?.calibration;
             if task.quick {
                 let same_generation = task.generation == self.generation;
                 self.controls_notice = Some(

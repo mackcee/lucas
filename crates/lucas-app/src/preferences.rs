@@ -58,6 +58,60 @@ pub fn level_picker(ui: &mut eframe::egui::Ui, index: &mut usize) {
     }
 }
 
+/// Shared by standalone, tray and setup calibration. Presets follow the actual
+/// calibration monitor's pixel aspect ratio, not its Windows scaling setting.
+pub fn calibration_picker(
+    ui: &mut eframe::egui::Ui,
+    preferences: &mut lucas_store::CalibrationPreferences,
+    resolution: [u32; 2],
+) {
+    use eframe::egui::{ComboBox, DragValue};
+    use lucas_store::ScreenSize;
+    let label = |size| match size {
+        ScreenSize::Inches24 => "24″",
+        ScreenSize::Inches27 => "27″",
+        ScreenSize::Inches32 => "32″",
+        ScreenSize::Inches34 => "34″",
+        ScreenSize::Custom => "Custom",
+    };
+    ComboBox::from_label("Screen size (diagonal)")
+        .selected_text(label(preferences.screen_size))
+        .show_ui(ui, |ui| {
+            for size in [
+                ScreenSize::Inches24,
+                ScreenSize::Inches27,
+                ScreenSize::Inches32,
+                ScreenSize::Inches34,
+                ScreenSize::Custom,
+            ] {
+                ui.selectable_value(&mut preferences.screen_size, size, label(size));
+            }
+        });
+    if preferences.screen_size == ScreenSize::Custom {
+        ui.horizontal_wrapped(|ui| {
+            for (label, value) in ["Screen width (mm)", "Height (mm)"]
+                .into_iter()
+                .zip(&mut preferences.custom_size_mm)
+            {
+                ui.horizontal(|ui| {
+                    ui.label(label);
+                    ui.add(DragValue::new(value).range(100..=3000));
+                });
+            }
+        });
+    } else if let Ok([width, height]) = preferences.physical_size_mm(resolution) {
+        ui.label(format!(
+            "{width} × {height} mm · based on the main monitor's {} × {} resolution",
+            resolution[0], resolution[1]
+        ));
+    }
+    ui.horizontal(|ui| {
+        ui.label("Assumed distance (mm)");
+        ui.add(DragValue::new(&mut preferences.viewing_distance_mm).range(100..=3000));
+    });
+    ui.label("Screen size and distance are remembered when you start calibration. Choose Custom for measured dimensions, not Windows scaling.");
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SetupStep {
     #[default]
@@ -163,6 +217,9 @@ impl Setup {
         let profile = self.calibration.as_ref().ok_or("Missing calibration")?;
         profile.validate()?;
         let mut settings = self.draft.clone();
+        // Calibration remembers its display choices at start, independently of
+        // this draft. Finishing setup must not restore the older defaults.
+        settings.calibration = store.load_settings()?.calibration;
         settings.setup_completed = false;
         settings.validate()?;
         match std::fs::remove_file(store.data_folder().join("calibration.json")) {

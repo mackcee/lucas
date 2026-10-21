@@ -293,9 +293,15 @@ for reported webcam calibration evidence and its limits.
 
 Adjust front lighting and camera placement, connect the camera, and wait for the
 source/device and live tracking indicators. First startup can take up to two
-minutes; model warmup completes before the camera opens. Enter your actual screen
-dimensions (for the investigated 27-inch display: 597×336 mm, 3840×2160) and your
-viewing distance (about 650 mm in that setup). Do not substitute Windows DPI.
+minutes; model warmup completes before the camera opens. Pick **Screen size
+(diagonal)**: 24″, 27″, 32″ or 34″. Dimensions follow the main calibration monitor's
+resolution/aspect ratio, not Windows DPI: 27″ at 3840×2160 gives 598×336 mm after
+rounding. **Custom** allows measured dimensions (597×336 mm for the investigated
+display). Check your viewing distance (about 650 mm in that setup). Starting full
+calibration remembers these choices, including if it later fails or is cancelled.
+Reopen calibration from the tray or setup and confirm your choice and distance
+are preselected; finishing setup must preserve them. On an ultrawide monitor,
+confirm the displayed dimensions follow its resolution rather than 16:9.
 
 Follow the [in-app calibration guide](../crates/lucas-app/README.md#in-app-calibration)
 for target timing, natural movement, validation and saved-profile behavior. The
@@ -332,8 +338,9 @@ try {
 Get-ChildItem .\calibration-diagnostics\calibration-*.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1 FullName
 ```
 
-Enter the true physical screen size (e.g. 597×336 mm), keep the assumed distance
-consistent, and check the selected camera and map alignment. Physical size changes
+Select your screen's diagonal size (or **Custom** for measured dimensions such
+as 597×336 mm), keep the remembered assumed distance consistent, and check the
+selected camera and map alignment. Physical size changes
 the reported angular error but **not** the current normalized rectangular score
 for identical samples. A different sensitivity on a fresh run needs the numeric
 evidence; it cannot be attributed to mm alone. A threshold above 0.5 erodes all
